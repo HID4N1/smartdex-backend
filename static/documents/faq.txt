@@ -1,0 +1,102 @@
+FREQUENTLY ASKED QUESTIONS — SMARTDEX
+
+[GENERAL]
+
+Q: What does Smartdex do?
+A: Smartdex builds AI-powered web applications, automation systems, and data analytics platforms to help businesses digitize and optimize their operations.
+
+Q: What types of businesses do you work with?
+A: Smartdex works with SMEs, clinics, startups, and service-based businesses looking to improve efficiency through digital systems.
+
+Q: Do you only build websites?
+A: No. Smartdex focuses on building complete systems including web applications, dashboards, automation tools, and AI integrations, not just static websites.
+
+---
+
+[PROJECT PROCESS]
+
+Q: How does a project start?
+A: The process starts with requirement analysis, followed by defining features, estimating complexity, and providing a price range.
+
+Q: How long does a project take?
+A:
+
+* Basic website: 1–2 weeks
+* Web application (MVP): 3–6 weeks
+* Advanced systems: 6–12+ weeks
+
+Q: Do you provide design as well?
+A: Yes. Smartdex provides UI/UX design tailored to the project, focusing on usability and modern SaaS-style interfaces.
+
+---
+
+[PRICING]
+
+Q: How much does a project cost?
+A: Pricing depends on complexity:
+
+* Websites: 5,000 – 30,000 MAD
+* Web applications: 30,000 – 150,000+ MAD
+* AI and automation systems: 5,000 – 40,000 MAD
+
+Q: Do you provide fixed prices?
+A: No. Smartdex provides price ranges initially. Final pricing is determined after detailed requirements are defined.
+
+Q: Why are your prices higher than some freelancers?
+A: Smartdex builds complete, scalable systems with backend logic, automation, and analytics, not just simple websites.
+
+---
+
+[FEATURES & CAPABILITIES]
+
+Q: Can you build booking or reservation systems?
+A: Yes. Smartdex builds booking systems with scheduling, notifications, payments, and admin dashboards.
+
+Q: Can you integrate WhatsApp into systems?
+A: Yes. Smartdex integrates WhatsApp APIs for notifications, reminders, and automated workflows.
+
+Q: Do you build dashboards and analytics systems?
+A: Yes. Smartdex develops KPI dashboards and business intelligence systems for real-time data tracking.
+
+Q: Do you offer AI solutions?
+A: Yes. Smartdex builds AI chatbots, assistants, and RAG-based systems for customer support and internal use.
+
+---
+
+[TECHNICAL]
+
+Q: What technologies do you use?
+A: Smartdex uses React and Next.js for frontend, Django REST Framework for backend, and integrates AI using OpenAI APIs.
+
+Q: Do you build scalable systems?
+A: Yes. All systems are designed to scale with business growth and support multiple users and integrations.
+
+---
+
+[SUPPORT & MAINTENANCE]
+
+Q: Do you provide maintenance after delivery?
+A: Yes. Smartdex offers monthly maintenance, updates, and monitoring services.
+
+Q: Is hosting included?
+A: Hosting can be included or configured depending on client needs.
+
+Q: Can you update an existing system?
+A: Yes. Smartdex can improve, extend, or rebuild existing systems.
+
+---
+
+[BUSINESS & COLLABORATION]
+
+Q: Do you work with international clients?
+A: Yes. Smartdex works remotely with both local and international clients.
+
+Q: Do you sign contracts?
+A: Yes. Projects are formalized with clear scope and agreements.
+
+Q: Can I start with a small project?
+A: Yes. Many clients start with an MVP and scale later.
+
+---
+
+END OF DOCUMENT

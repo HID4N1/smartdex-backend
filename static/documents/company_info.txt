@@ -1,0 +1,133 @@
+COMPANY INFORMATION — SMARTDEX
+
+[IDENTITY]
+Company Name: Smartdex
+Website: https://smartdex.ma
+Industry: SaaS, Artificial Intelligence, Web Application Development, Automation, Data Analytics
+Tagline: Smart systems for smarter businesses
+
+[DESCRIPTION]
+Smartdex is a technology company that designs and builds AI-powered web applications, business automation systems, and data analytics platforms. The company focuses on helping businesses digitize operations, improve efficiency, and leverage data for decision-making.
+
+[VALUE PROPOSITION]
+Smartdex helps businesses reduce manual work, eliminate inefficient processes, and gain real-time visibility into their operations through custom-built digital systems.
+
+Key Differentiators:
+
+* Combines custom software development, AI, automation, and analytics in one solution
+* Focuses on business outcomes (efficiency, revenue, scalability)
+* Builds complete systems (frontend, backend, automation, data layer)
+* Tailored solutions instead of generic templates
+
+[TARGET CLIENTS]
+
+* Small and Medium Enterprises (TPE & PME) 
+* Clinics and healthcare providers
+* car rental companies
+* Service-based businesses
+* Startups
+* Local businesses transitioning to digital systems
+
+[SERVICES]
+
+1. Custom Web Application Development
+
+   * React / Next.js based platforms
+   * Admin dashboards and internal tools
+
+2. SaaS Development
+
+   * Scalable multi-tenant platforms
+   * Subscription-based systems
+
+3. AI Integration
+
+   * Chatbots for customer support
+   * AI assistants for business workflows
+   * Retrieval-Augmented Generation (RAG) systems
+
+4. Business Process Automation
+
+   * Workflow automation
+   * WhatsApp-based notifications and systems
+   * CRM logic and integrations
+
+5. Data Analytics & Dashboards
+
+   * KPI tracking systems
+   * Business intelligence dashboards
+   * Data visualization tools
+
+6. Booking & Reservation Systems
+
+   * Online scheduling platforms
+   * Client management systems
+
+[BUSINESS MODEL]
+
+* Project-based pricing for custom systems
+* Subscription-based pricing for SaaS and maintenance
+
+
+[TECHNOLOGY STACK]
+Frontend:
+
+* React
+* Next.js
+
+Backend:
+
+* Django REST Framework
+
+Database:
+
+* PostgreSQL
+* MySQL
+
+AI & Automation:
+
+* OpenAI API
+* LangChain (optional)
+* RAG architectures
+
+Integrations:
+
+* WhatsApp APIs
+* Payment systems (e.g., Stripe)
+
+Deployment & DevOps:
+
+* Docker
+
+[PROJECT EXPERIENCE]
+
+* Transport routing system with real-time guidance and station detection
+* Subscription management platform with agents, missions, and renewals
+* Business analytics dashboards with KPI tracking
+* Multi-step forms connected to backend APIs
+* Admin panels with CRUD operations for real-world workflows
+
+[POSITIONING]
+Smartdex is positioned as a digital systems builder rather than a traditional web agency. The company focuses on building scalable, intelligent, and automated solutions for businesses.
+
+[OPERATIONS]
+Location: Morocco
+Work Mode: Remote and local client support
+Team Size: Small, growing team
+
+[GOALS]
+Short-Term Goals:
+
+* Acquire consistent B2B clients
+* Develop reusable SaaS products
+
+Long-Term Vision:
+
+* Become a leading AI and automation company in Morocco and MENA
+* Launch scalable SaaS platforms
+
+[CALL TO ACTION]
+
+* Get a custom system for your business
+* Start your project
+* book a meeting

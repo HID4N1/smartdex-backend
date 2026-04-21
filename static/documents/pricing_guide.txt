@@ -1,0 +1,172 @@
+PRICING INFORMATION — SMARTDEX
+
+[OVERVIEW]
+This document defines pricing structures, ranges, and rules used by Smartdex for estimating and generating quotes for digital services. Pricing is adapted based on project complexity, client type, and required features.
+
+Currency: MAD (Moroccan Dirham)
+
+---
+
+[MARKET REFERENCE — MOROCCO]
+
+* Basic websites: 5,000 – 15,000 MAD
+* Professional websites: 15,000 – 30,000 MAD
+* Web applications / SaaS: 30,000 – 150,000+ MAD
+* Mobile applications: 90,000 – 600,000+ MAD
+* Monthly digital services: 2,500 – 20,000 MAD
+
+---
+
+[SERVICE PRICING]
+
+1. WEB DEVELOPMENT
+
+1.1 Showcase Website
+
+* Basic: 5,000 – 10,000 MAD
+  Features: static pages, simple design, no backend
+
+* Standard: 10,000 – 20,000 MAD
+  Features: responsive design, contact forms, CMS
+
+* Premium: 20,000 – 30,000 MAD
+  Features: custom UI, animations, SEO optimization
+
+1.2 Web Applications (Core Smartdex Offer)
+
+* MVP (Minimum Viable Product): 30,000 – 60,000 MAD
+  Features: authentication, dashboard, CRUD, API integration
+
+* Advanced System: 60,000 – 120,000 MAD
+  Features: role management, automation, analytics dashboards
+
+* Complex Platform: 120,000 – 200,000+ MAD
+  Features: multi-user systems, real-time features, scalability
+
+1.3 SaaS Platforms
+
+* Initial Build: 60,000 – 150,000+ MAD
+* Monthly maintenance: 1,000 – 5,000 MAD
+
+---
+
+2. AI & AUTOMATION
+
+2.1 Chatbots (RAG-based)
+
+* Basic chatbot: 5,000 – 10,000 MAD
+* Advanced (RAG + knowledge base): 10,000 – 25,000 MAD
+
+2.2 Automation Systems
+
+* Simple workflows: 3,000 – 8,000 MAD
+* Advanced automation (multi-step, integrations): 8,000 – 20,000 MAD
+
+2.3 AI Assistants / Internal Tools
+
+* Range: 10,000 – 40,000 MAD depending on complexity
+
+---
+
+3. DATA ANALYTICS
+
+3.1 Dashboards
+
+* Basic dashboard: 5,000 – 10,000 MAD
+* Advanced dashboards: 10,000 – 25,000 MAD
+
+3.2 Business Intelligence Systems
+
+* Full analytics systems: 20,000 – 60,000 MAD
+
+---
+
+4. BOOKING & MANAGEMENT SYSTEMS
+
+* Basic booking system: 8,000 – 15,000 MAD
+* Advanced system (payments, notifications): 15,000 – 40,000 MAD
+
+---
+
+5. MONTHLY SERVICES
+
+* Maintenance & support: 500 – 2,000 MAD/month
+* Automation hosting & monitoring: 1,000 – 3,000 MAD/month
+* AI system maintenance: 1,000 – 5,000 MAD/month
+
+---
+
+[PRICING MODIFIERS]
+
+Increase price if:
+
+* Multiple user roles (+20% to +40%)
+* Real-time features (+20%)
+* Third-party integrations (+10% to +30%)
+* Custom UI/UX design (+15% to +25%)
+* Tight deadlines (+20%)
+
+Decrease price if:
+
+* Template-based solution (-20%)
+* Long-term contract (-10% to -25%)
+* MVP scope reduction (-15%)
+
+---
+
+[CLIENT SEGMENTATION]
+
+Small businesses:
+
+* Budget-sensitive
+* Focus on MVP or basic systems
+* Typical range: 5,000 – 20,000 MAD
+
+SMEs:
+
+* Need automation and dashboards
+* Typical range: 20,000 – 80,000 MAD
+
+High-value clients / enterprises:
+
+* Require scalability and integrations
+* Typical range: 80,000 – 200,000+ MAD
+
+---
+
+[POSITIONING RULES]
+
+* Smartdex does NOT compete on lowest price
+* Focus is on value, automation, and long-term ROI
+* Prefer building systems over simple websites
+* Encourage upselling from websites → automation → full systems
+
+---
+
+[QUOTE GENERATION LOGIC]
+
+When generating a quote:
+
+1. Identify service type (website, app, AI, etc.)
+2. Estimate complexity (basic, advanced, complex)
+3. Apply relevant base price range
+4. Add modifiers based on features
+5. Adjust based on client segment
+6. Return a price range, not a fixed number
+
+Example:
+"Advanced web app with automation for SME"
+→ Base: 60,000 MAD
+→ + automation (+20%)
+→ Final estimate: 70,000 – 85,000 MAD
+
+---
+
+[NOTES]
+
+* All prices are estimates and subject to refinement after requirement analysis
+* Final pricing depends on scope clarity and technical specifications
+* Maintenance and support are recommended for all systems
+
+END OF DOCUMENT
+ 
