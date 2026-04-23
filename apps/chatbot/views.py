@@ -1,63 +1,55 @@
-import logging
-
-from rest_framework.decorators import api_view
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
-from .serializers import ChatRequestSerializer
+from apps.chatbot.models import Conversation, ChatMessage
+from apps.chatbot.serializers import ChatRequestSerializer, ConversationSerializer
 from core.ai.rag.chain import RAGChain
 
-logger = logging.getLogger(__name__)
 
+class ChatbotAPIView(APIView):
+    def post(self, request):
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
-def get_chain() -> RAGChain:
-    return RAGChain()
+        message = serializer.validated_data["message"]
+        conversation_id = serializer.validated_data.get("conversation_id")
 
+        if conversation_id:
+            conversation = Conversation.objects.filter(id=conversation_id).first()
+            if not conversation:
+                return Response(
+                    {"detail": "Conversation not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+        else:
+            conversation = Conversation.objects.create(title="New conversation")
 
-@api_view(["POST"])
-def chat(request):
-    serializer = ChatRequestSerializer(data=request.data)
-
-    if not serializer.is_valid():
-        return Response(
-            {
-                "message": "",
-                "intent": "unknown",
-                "answer": "",
-                "sources": [],
-                "error": "Invalid request.",
-                "details": serializer.errors,
-            },
-            status=status.HTTP_400_BAD_REQUEST,
+        ChatMessage.objects.create(
+            conversation=conversation,
+            role="user",
+            content=message,
         )
 
-    message = serializer.validated_data["message"]
-
-    try:
-        chain = get_chain()
-        result = chain.run(message)
-
-        return Response(
-            {
-                "message": message,
-                "intent": result.get("intent", "general"),
-                "answer": result.get("answer", ""),
-                "sources": result.get("sources", []),
-                "error": None,
-            },
-            status=status.HTTP_200_OK,
+        history = list(
+            conversation.messages.order_by("created_at").values("role", "content")
         )
 
-    except Exception as e:
-        logger.exception("Chatbot request failed: %s", e)
+        rag = RAGChain()
+        result = rag.run(message, history=history[:-1])
 
-        return Response(
-            {
-                "message": message,
-                "intent": "unknown",
-                "answer": "",
-                "sources": [],
-                "error": "Unable to process the request right now.",
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        assistant_message = ChatMessage.objects.create(
+            conversation=conversation,
+            role="assistant",
+            content=result["answer"],
         )
+
+        return Response({
+            "conversation_id": str(conversation.id),
+            "message_id": assistant_message.id,
+            "query": result["query"],
+            "rewritten_query": result.get("rewritten_query"),
+            "intent": result["intent"],
+            "answer": result["answer"],
+            "sources": result["sources"],
+        })

@@ -15,13 +15,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROMPT = """You are a Smartdex AI consultant specialized in SaaS, AI, automation, and digital systems.
 
+You are acting like a real sales consultant helping a client.
+
 STRICT RULES:
 - Use ONLY the provided context
 - Do NOT invent information
-- Always provide price ranges, never fixed prices
-- If information is missing, say so clearly
-- Keep answers structured and professional
-- Do not prefix the answer with labels like "FINAL ANSWER"
+- Always give price ranges, never fixed prices
+- If information is missing, say it clearly
+- Keep answers natural and human
+- Be helpful, clear, and business-oriented
+
+CHAT HISTORY:
+{history}
 
 CONTEXT:
 {context}
@@ -30,11 +35,10 @@ QUESTION:
 {question}
 
 INSTRUCTIONS:
-- Extract relevant information from the context
-- Answer clearly and concisely
-- If pricing is involved, explain factors affecting cost
-- If multiple scenarios exist, mention them
-- If the question is vague, guide the user toward the right next detail
+- Answer like a human consultant
+- Use the context to answer
+- If the request is vague, ask 1 smart follow-up question
+- Guide the user toward the right solution
 """
 
 
@@ -74,10 +78,8 @@ class RAGChain:
 
         text = text.lower()
         text = text.replace("’", "'").replace("`", "'")
-
         text = unicodedata.normalize("NFKD", text)
         text = "".join(ch for ch in text if not unicodedata.combining(ch))
-
         text = " ".join(text.split())
         return text
 
@@ -88,71 +90,34 @@ class RAGChain:
             "pricing": [
                 "price", "pricing", "cost", "quote", "budget", "how much", "estimate", "devis",
                 "prix", "cout", "couts", "tarif", "tarification", "combien", "estimation",
-                "combien ca coute", "combien cela coute", "budget projet", "budget site web"
             ],
             "technical": [
                 "stack", "technology", "backend", "frontend", "api", "django", "react", "architecture",
-                "database", "hosting", "deployment", "integrations", "technical",
-                "technique", "technologie", "architecture technique", "base de donnees",
-                "hebergement", "deploiement", "integration", "developpement technique"
+                "database", "hosting", "deployment", "integrations",
+                "technique", "technologie", "base de donnees", "hebergement", "deploiement",
             ],
             "company": [
                 "who are you", "what do you do", "about", "company", "smartdex",
-                "qui es tu", "qui etes vous", "qui es-tu", "qui etes-vous",
-                "que faites vous", "que faites-vous", "a propos", "presentation",
-                "societe", "entreprise", "agence", "qui est smartdex"
+                "qui es tu", "qui etes vous", "que faites vous", "a propos", "societe", "entreprise",
             ],
             "services": [
-                "service", "services", "offer", "offering", "build", "develop", "development",
-                "system", "platform", "booking", "dashboard", "website", "web app", "webapp",
-                "mobile app", "saas", "automation", "automate", "crm", "erp", "software",
-                "solution", "digital solution", "business system", "ecommerce", "e-commerce",
-                "online store", "store", "marketplace",
-
-                "site web", "application web", "application mobile", "plateforme",
-                "solution saas", "solution digitale", "solution numerique", "outil digital",
-                "logiciel", "systeme", "automatiser", "automatisation", "transformer mon activite",
-                "digitaliser", "j ai besoin", "je veux", "je souhaite", "creer un site",
-                "creer une plateforme", "developper une solution", "besoin d une solution",
-                "besoin d un site", "besoin d une application", "pour mon activite",
-                "pour mon entreprise", "pour mon business", "reservation", "prise de rendez vous",
-                "site e commerce", "site ecommerce", "boutique en ligne", "vente en ligne"
+                "service", "services", "build", "develop", "system", "platform", "website", "web app",
+                "mobile app", "saas", "automation", "crm", "erp", "software", "solution",
+                "site web", "application web", "application mobile", "plateforme", "logiciel",
+                "automatiser", "automatisation", "j ai besoin", "je veux", "je souhaite",
+                "ecommerce", "e-commerce", "site ecommerce", "site e commerce", "boutique en ligne",
             ],
         }
 
-        scores = {
-            "pricing": 0,
-            "technical": 0,
-            "company": 0,
-            "services": 0,
-        }
+        scores = {k: 0 for k in intent_keywords.keys()}
 
         for intent, keywords in intent_keywords.items():
             for keyword in keywords:
                 if keyword in q:
                     scores[intent] += 1
 
-        if "smartdex" in q and any(term in q for term in ["qui", "about", "a propos", "company", "entreprise"]):
-            scores["company"] += 2
-
-        if any(term in q for term in [
-            "site web", "saas", "automatiser", "automation", "plateforme",
-            "application", "ecommerce", "e-commerce", "boutique en ligne"
-        ]):
-            scores["services"] += 2
-
-        if any(term in q for term in ["prix", "cout", "tarif", "budget", "devis", "combien"]):
-            scores["pricing"] += 2
-
-        if any(term in q for term in ["api", "django", "react", "backend", "frontend", "architecture"]):
-            scores["technical"] += 2
-
         best_intent = max(scores, key=scores.get)
-
-        if scores[best_intent] == 0:
-            return "general"
-
-        return best_intent
+        return best_intent if scores[best_intent] > 0 else "general"
 
     def _intent_filter(self, intent: str) -> Optional[Dict]:
         mapping = {
@@ -164,18 +129,61 @@ class RAGChain:
         }
         return mapping.get(intent)
 
+    def _build_history_text(self, history: Optional[List[Dict]]) -> str:
+        if not history:
+            return "No previous conversation."
+
+        lines = []
+        for msg in history[-6:]:
+            role = msg.get("role", "user").capitalize()
+            content = msg.get("content", "").strip()
+            if content:
+                lines.append(f"{role}: {content}")
+
+        return "\n".join(lines) if lines else "No previous conversation."
+
+    def _rewrite_query_with_history(self, query: str, history: Optional[List[Dict]]) -> str:
+        """
+        Rewrite short follow-up messages into a standalone question using recent history.
+        """
+        if not history or len(query.split()) > 12:
+            return query
+
+        history_text = self._build_history_text(history)
+
+        prompt = f"""
+You are rewriting a user's follow-up message into a standalone query for retrieval.
+
+Conversation history:
+{history_text}
+
+Latest user message:
+{query}
+
+Return only the rewritten standalone query.
+If the latest message is already clear on its own, return it unchanged.
+"""
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "Rewrite follow-up questions into standalone retrieval queries."},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+            )
+            rewritten = (response.choices[0].message.content or "").strip()
+            return rewritten or query
+        except Exception:
+            return query
+
     def _filter_weak_docs(self, docs: List[Dict]) -> List[Dict]:
         filtered = []
-
         for doc in docs:
             distance = doc.get("distance")
-            if distance is None:
+            if distance is None or distance <= self.max_distance:
                 filtered.append(doc)
-                continue
-
-            if distance <= self.max_distance:
-                filtered.append(doc)
-
         return filtered
 
     def _rerank(self, docs: List[Dict], query: str, max_docs: Optional[int] = None) -> List[Dict]:
@@ -197,7 +205,6 @@ class RAGChain:
             text_score = sum(term in text for term in query_terms)
             source_score = sum(term in source for term in query_terms)
             type_score = sum(term in doc_type for term in query_terms)
-
             distance_score = distance if distance is not None else 999999
 
             return (text_score + source_score + type_score, -distance_score)
@@ -218,16 +225,14 @@ class RAGChain:
             if not text:
                 continue
 
-            block = (
-                f"[SOURCE: {source} | CHUNK: {chunk_index} | TYPE: {doc_type}]\n"
-                f"{text}"
-            )
+            block = f"[SOURCE: {source} | CHUNK: {chunk_index} | TYPE: {doc_type}]\n{text}"
             context_blocks.append(block)
 
         return "\n\n".join(context_blocks)
 
-    def _build_prompt(self, context: str, question: str) -> str:
+    def _build_prompt(self, history: str, context: str, question: str) -> str:
         return self.prompt_template.format(
+            history=history,
             context=context,
             question=question,
         )
@@ -238,20 +243,18 @@ class RAGChain:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a Smartdex AI assistant. Be accurate, grounded, and concise.",
+                    "content": "You are a Smartdex AI assistant. Be accurate, grounded, natural, and sales-oriented.",
                 },
                 {
                     "role": "user",
                     "content": prompt,
                 },
             ],
-            temperature=0.3,
+            temperature=0.4,
         )
+        return (response.choices[0].message.content or "").strip()
 
-        content = response.choices[0].message.content or ""
-        return content.strip()
-
-    def run(self, query: str) -> Dict:
+    def run(self, query: str, history: Optional[List[Dict]] = None) -> Dict:
         clean_query = sanitize_query(query)
 
         if not clean_query:
@@ -261,18 +264,16 @@ class RAGChain:
                 "answer": "Please provide a valid question.",
                 "sources": [],
                 "context_used": "",
+                "rewritten_query": query,
             }
 
-        intent = self._detect_intent(clean_query)
+        rewritten_query = self._rewrite_query_with_history(clean_query, history)
+        intent = self._detect_intent(rewritten_query)
         filter_metadata = self._intent_filter(intent)
-
-        logger.info("Chat query=%s", clean_query)
-        logger.info("Detected intent=%s", intent)
-        logger.info("Filter metadata=%s", filter_metadata)
 
         try:
             docs = self.retriever.search(
-                clean_query,
+                rewritten_query,
                 top_k=self.top_k,
                 filter_metadata=filter_metadata,
             )
@@ -280,6 +281,7 @@ class RAGChain:
             logger.exception("Retriever failed: %s", e)
             return {
                 "query": clean_query,
+                "rewritten_query": rewritten_query,
                 "intent": intent,
                 "answer": "I could not retrieve relevant information right now.",
                 "sources": [],
@@ -287,25 +289,22 @@ class RAGChain:
             }
 
         strong_docs = self._filter_weak_docs(docs)
-
-        if strong_docs:
-            docs = strong_docs
-        else:
-            docs = docs[:3]
-
-        docs = self._rerank(docs, clean_query)
+        docs = strong_docs if strong_docs else docs[:3]
+        docs = self._rerank(docs, rewritten_query)
 
         if not docs:
             return {
                 "query": clean_query,
+                "rewritten_query": rewritten_query,
                 "intent": intent,
                 "answer": "I could not find enough relevant information to answer that accurately.",
                 "sources": [],
                 "context_used": "",
             }
 
+        history_text = self._build_history_text(history)
         context = self._build_context(docs)
-        prompt = self._build_prompt(context, clean_query)
+        prompt = self._build_prompt(history_text, context, clean_query)
 
         try:
             answer = self._generate(prompt)
@@ -313,17 +312,16 @@ class RAGChain:
             logger.exception("LLM generation failed: %s", e)
             return {
                 "query": clean_query,
+                "rewritten_query": rewritten_query,
                 "intent": intent,
                 "answer": "I found relevant information, but I could not generate a response right now.",
                 "sources": [d.get("metadata", {}) for d in docs],
                 "context_used": context,
             }
 
-        logger.info("Sources=%s", [d.get("metadata", {}) for d in docs])
-        logger.info("Answer length=%s", len(answer))
-
         return {
             "query": clean_query,
+            "rewritten_query": rewritten_query,
             "intent": intent,
             "answer": answer,
             "sources": [d.get("metadata", {}) for d in docs],
