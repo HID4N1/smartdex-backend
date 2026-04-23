@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import logging
 import os
+import unicodedata
 
 from openai import OpenAI
 
@@ -41,21 +42,20 @@ class RAGChain:
     def __init__(
         self,
         prompt_path: Optional[str] = None,
-        top_k: int = 5,
-        rerank_top_n: int = 3,
+        top_k: int = 8,
+        rerank_top_n: int = 4,
         model: str = "gpt-4.1-mini",
+        max_distance: float = 1.8,
     ):
         self.retriever = Retriever()
         self.top_k = top_k
         self.rerank_top_n = rerank_top_n
         self.model = model
+        self.max_distance = max_distance
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.prompt_template = self._load_prompt(prompt_path)
 
     def _load_prompt(self, path: Optional[str] = None) -> str:
-        """
-        Load prompt from provided path, then default file path, otherwise fallback to DEFAULT_PROMPT.
-        """
         if path:
             prompt_file = Path(path)
             if prompt_file.exists() and prompt_file.is_file():
@@ -68,74 +68,144 @@ class RAGChain:
         logger.warning("Prompt file not found. Falling back to DEFAULT_PROMPT.")
         return DEFAULT_PROMPT
 
+    def _normalize_text(self, text: str) -> str:
+        if not text:
+            return ""
+
+        text = text.lower()
+        text = text.replace("’", "'").replace("`", "'")
+
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(ch for ch in text if not unicodedata.combining(ch))
+
+        text = " ".join(text.split())
+        return text
+
     def _detect_intent(self, query: str) -> str:
-        """
-        Classify the user query into a lightweight intent bucket.
-        """
-        q = query.lower()
+        q = self._normalize_text(query)
 
-        pricing_keywords = ["price", "pricing", "cost", "quote", "budget", "how much", "devis", "estimate"]
-        technical_keywords = ["stack", "technology", "backend", "frontend", "api", "django", "react", "architecture"]
-        services_keywords = ["service", "offer", "build", "develop", "system", "platform", "booking", "dashboard"]
-        company_keywords = ["who are you", "what do you do", "smartdex", "company", "about"]
+        intent_keywords = {
+            "pricing": [
+                "price", "pricing", "cost", "quote", "budget", "how much", "estimate", "devis",
+                "prix", "cout", "couts", "tarif", "tarification", "combien", "estimation",
+                "combien ca coute", "combien cela coute", "budget projet", "budget site web"
+            ],
+            "technical": [
+                "stack", "technology", "backend", "frontend", "api", "django", "react", "architecture",
+                "database", "hosting", "deployment", "integrations", "technical",
+                "technique", "technologie", "architecture technique", "base de donnees",
+                "hebergement", "deploiement", "integration", "developpement technique"
+            ],
+            "company": [
+                "who are you", "what do you do", "about", "company", "smartdex",
+                "qui es tu", "qui etes vous", "qui es-tu", "qui etes-vous",
+                "que faites vous", "que faites-vous", "a propos", "presentation",
+                "societe", "entreprise", "agence", "qui est smartdex"
+            ],
+            "services": [
+                "service", "services", "offer", "offering", "build", "develop", "development",
+                "system", "platform", "booking", "dashboard", "website", "web app", "webapp",
+                "mobile app", "saas", "automation", "automate", "crm", "erp", "software",
+                "solution", "digital solution", "business system", "ecommerce", "e-commerce",
+                "online store", "store", "marketplace",
 
-        if any(k in q for k in pricing_keywords):
-            return "pricing"
-        if any(k in q for k in technical_keywords):
-            return "technical"
-        if any(k in q for k in company_keywords):
-            return "company"
-        if any(k in q for k in services_keywords):
-            return "services"
+                "site web", "application web", "application mobile", "plateforme",
+                "solution saas", "solution digitale", "solution numerique", "outil digital",
+                "logiciel", "systeme", "automatiser", "automatisation", "transformer mon activite",
+                "digitaliser", "j ai besoin", "je veux", "je souhaite", "creer un site",
+                "creer une plateforme", "developper une solution", "besoin d une solution",
+                "besoin d un site", "besoin d une application", "pour mon activite",
+                "pour mon entreprise", "pour mon business", "reservation", "prise de rendez vous",
+                "site e commerce", "site ecommerce", "boutique en ligne", "vente en ligne"
+            ],
+        }
 
-        return "general"
+        scores = {
+            "pricing": 0,
+            "technical": 0,
+            "company": 0,
+            "services": 0,
+        }
+
+        for intent, keywords in intent_keywords.items():
+            for keyword in keywords:
+                if keyword in q:
+                    scores[intent] += 1
+
+        if "smartdex" in q and any(term in q for term in ["qui", "about", "a propos", "company", "entreprise"]):
+            scores["company"] += 2
+
+        if any(term in q for term in [
+            "site web", "saas", "automatiser", "automation", "plateforme",
+            "application", "ecommerce", "e-commerce", "boutique en ligne"
+        ]):
+            scores["services"] += 2
+
+        if any(term in q for term in ["prix", "cout", "tarif", "budget", "devis", "combien"]):
+            scores["pricing"] += 2
+
+        if any(term in q for term in ["api", "django", "react", "backend", "frontend", "architecture"]):
+            scores["technical"] += 2
+
+        best_intent = max(scores, key=scores.get)
+
+        if scores[best_intent] == 0:
+            return "general"
+
+        return best_intent
 
     def _intent_filter(self, intent: str) -> Optional[Dict]:
-        """
-        Map intent to metadata filter.
-        Requires `doc_type` metadata in your ingested chunks.
-        """
         mapping = {
             "pricing": {"doc_type": "pricing"},
-            "technical": {"doc_type": "technical"},
-            "services": {"doc_type": "services"},
-            "company": {"doc_type": "company"},
+            "technical": None,
+            "services": None,
+            "company": None,
             "general": None,
         }
         return mapping.get(intent)
 
+    def _filter_weak_docs(self, docs: List[Dict]) -> List[Dict]:
+        filtered = []
+
+        for doc in docs:
+            distance = doc.get("distance")
+            if distance is None:
+                filtered.append(doc)
+                continue
+
+            if distance <= self.max_distance:
+                filtered.append(doc)
+
+        return filtered
+
     def _rerank(self, docs: List[Dict], query: str, max_docs: Optional[int] = None) -> List[Dict]:
-        """
-        Lightweight reranking using keyword overlap.
-        Keeps the strongest docs before prompt injection.
-        """
         if not docs:
             return []
 
         if max_docs is None:
             max_docs = self.rerank_top_n
 
-        query_terms = [term for term in query.lower().split() if term.strip()]
+        query_terms = [term for term in self._normalize_text(query).split() if term.strip()]
 
-        def score(doc: Dict) -> int:
-            text = doc.get("text", "").lower()
+        def score(doc: Dict) -> tuple:
+            text = self._normalize_text(doc.get("text", ""))
             metadata = doc.get("metadata", {})
-            source = str(metadata.get("source", "")).lower()
-            doc_type = str(metadata.get("doc_type", "")).lower()
+            source = self._normalize_text(str(metadata.get("source", "")))
+            doc_type = self._normalize_text(str(metadata.get("doc_type", "")))
+            distance = doc.get("distance")
 
             text_score = sum(term in text for term in query_terms)
             source_score = sum(term in source for term in query_terms)
             type_score = sum(term in doc_type for term in query_terms)
 
-            return text_score + source_score + type_score
+            distance_score = distance if distance is not None else 999999
+
+            return (text_score + source_score + type_score, -distance_score)
 
         ranked = sorted(docs, key=score, reverse=True)
         return ranked[:max_docs]
 
     def _build_context(self, docs: List[Dict]) -> str:
-        """
-        Build the final context block for the LLM.
-        """
         context_blocks = []
 
         for doc in docs:
@@ -157,18 +227,12 @@ class RAGChain:
         return "\n\n".join(context_blocks)
 
     def _build_prompt(self, context: str, question: str) -> str:
-        """
-        Inject retrieved context and user question into prompt template.
-        """
         return self.prompt_template.format(
             context=context,
             question=question,
         )
 
     def _generate(self, prompt: str) -> str:
-        """
-        Call OpenAI chat completion.
-        """
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -188,10 +252,6 @@ class RAGChain:
         return content.strip()
 
     def run(self, query: str) -> Dict:
-        """
-        Full RAG execution pipeline.
-        Always returns a consistent dictionary shape.
-        """
         clean_query = sanitize_query(query)
 
         if not clean_query:
@@ -225,6 +285,13 @@ class RAGChain:
                 "sources": [],
                 "context_used": "",
             }
+
+        strong_docs = self._filter_weak_docs(docs)
+
+        if strong_docs:
+            docs = strong_docs
+        else:
+            docs = docs[:3]
 
         docs = self._rerank(docs, clean_query)
 

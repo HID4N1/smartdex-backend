@@ -1,5 +1,3 @@
-# scripts/ingest_docs.py
-
 import uuid
 from core.ai.rag.loader import load_txt_files
 from core.ai.rag.vectorstore import VectorStore
@@ -7,17 +5,18 @@ from core.utils.clean_text import clean_text
 from core.utils.chunker import chunk_text
 from core.utils.validators import is_valid_text
 from dotenv import load_dotenv
+
 load_dotenv()
 
-
 DOCUMENTS_PATH = "static/documents"
+
 
 def get_doc_type(filename: str) -> str:
     mapping = {
         "company_info.txt": "company",
         "faq.txt": "faq",
         "pricing_guide.txt": "pricing",
-        "pricing_info.txt": "pricing",  # in case you used this name
+        "pricing_info.txt": "pricing",
         "services_detailed.txt": "services",
         "rules.txt": "rules",
         "technical_stack.txt": "technical",
@@ -25,23 +24,38 @@ def get_doc_type(filename: str) -> str:
     }
     return mapping.get(filename, "general")
 
-def build_chunks(documents):
-    """
-    Converts raw documents into chunks with metadata.
-    """
 
+def get_chunking_config(doc_type: str) -> dict:
+    configs = {
+        "faq": {"chunk_size": 350, "overlap": 50},
+        "rules": {"chunk_size": 300, "overlap": 40},
+        "pricing": {"chunk_size": 500, "overlap": 80},
+        "services": {"chunk_size": 600, "overlap": 100},
+        "technical": {"chunk_size": 700, "overlap": 120},
+        "company": {"chunk_size": 450, "overlap": 70},
+        "general": {"chunk_size": 550, "overlap": 90},
+    }
+    return configs.get(doc_type, configs["general"])
+
+
+def build_chunks(documents):
     chunks = []
 
     for filename, content in documents.items():
-
         if not is_valid_text(content):
             continue
 
-        # 1. clean
+        doc_type = get_doc_type(filename)
         cleaned = clean_text(content)
+        chunking = get_chunking_config(doc_type)
 
-        # 2. chunk
-        split_chunks = chunk_text(cleaned)
+        split_chunks = chunk_text(
+            cleaned,
+            chunk_size=chunking["chunk_size"],
+            overlap=chunking["overlap"],
+        )
+
+        total_chunks = len(split_chunks)
 
         for i, chunk in enumerate(split_chunks):
             chunks.append({
@@ -50,7 +64,8 @@ def build_chunks(documents):
                 "metadata": {
                     "source": filename,
                     "chunk_index": i,
-                    "doc_type": get_doc_type(filename),
+                    "total_chunks": total_chunks,
+                    "doc_type": doc_type,
                 }
             })
 
@@ -61,11 +76,9 @@ def ingest():
     print("Loading documents...")
 
     documents = load_txt_files(DOCUMENTS_PATH)
-
     print(f"Loaded {len(documents)} files")
 
     chunks = build_chunks(documents)
-
     print(f"Generated {len(chunks)} chunks")
 
     vectorstore = VectorStore()
