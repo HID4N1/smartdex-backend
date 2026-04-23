@@ -1,0 +1,137 @@
+USE CASE: Clinic Appointment System
+
+Problem:
+- Manual booking via phone
+- Missed appointments
+- No patient tracking
+
+Solution:
+- Online booking system
+- Automated reminders (WhatsApp/email)
+- Admin dashboard
+
+Features:
+- Appointment scheduling
+- Notifications
+- Patient management
+
+Estimated range:
+15,000 MAD – 40,000 MAD
+
+
+---
+
+USE CASE: E-commerce Website
+
+Problem:
+- No online sales channel
+- Limited reach
+- Manual order handling
+
+Solution:
+- Online store with payment integration
+- Product catalog
+- Order management dashboard
+
+Features:
+- Product pages
+- Cart and checkout
+- Payment integration
+- Admin panel
+
+Estimated range:
+20,000 MAD – 60,000 MAD
+
+
+---
+
+USE CASE: Restaurant Ordering System
+
+Problem:
+- Manual orders
+- No online visibility
+- Slow service
+
+Solution:
+- Online ordering system
+- Digital menu
+- Order tracking
+
+Features:
+- Menu management
+- Online orders
+- Notifications
+- Admin dashboard
+
+Estimated range:
+12,000 MAD – 35,000 MAD
+
+
+---
+
+USE CASE: Gym Management System
+
+Problem:
+- Manual member tracking
+- No automation
+- Payment issues
+
+Solution:
+- Member management system
+- Subscription tracking
+- Notifications
+
+Features:
+- Member profiles
+- Subscription management
+- Attendance tracking
+- Dashboard
+
+Estimated range:
+15,000 MAD – 45,000 MAD
+
+
+---
+
+USE CASE: Real Estate Platform
+
+Problem:
+- Manual property listing
+- No centralized system
+- Poor client experience
+
+Solution:
+- Property listing platform
+- Search and filtering
+- Admin dashboard
+
+Features:
+- Listings management
+- Search filters
+- Contact system
+
+Estimated range:
+25,000 MAD – 80,000 MAD
+
+
+---
+
+USE CASE: SaaS Business Tool
+
+Problem:
+- Manual processes
+- Lack of scalability
+- No centralized system
+
+Solution:
+- Custom SaaS platform
+- User authentication
+- Dashboard and analytics
+
+Features:
+- Multi-user system
+- API integrations
+- Admin dashboard
+
+Estimated range:
+40,000 MAD – 150,000 MAD

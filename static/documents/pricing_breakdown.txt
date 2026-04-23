@@ -1,0 +1,146 @@
+PRICING BREAKDOWN – SMARTDEX
+
+All prices are estimates and depend on project complexity, features, and business requirements.
+
+---
+
+WEBSITE DEVELOPMENT
+
+Starter Website:
+- Basic pages (Home, About, Contact)
+- Simple design
+- No advanced features
+Range: 3,000 – 7,000 MAD
+
+Business Website:
+- Professional design
+- Responsive layout
+- Basic integrations
+Range: 7,000 – 20,000 MAD
+
+Website with Booking System:
+- Appointment scheduling
+- Notifications
+- Admin dashboard
+Range: 10,000 – 30,000 MAD
+
+E-commerce Website:
+- Product catalog
+- Cart and checkout
+- Payment integration
+- Order management
+Range: 15,000 – 50,000 MAD
+
+---
+
+WEB APPLICATIONS
+
+Custom Web Application:
+- Business-specific functionality
+- Dashboard and user roles
+- Data management
+Range: 15,000 – 60,000 MAD
+
+Advanced Platform:
+- Complex workflows
+- Multi-user system
+- Integrations
+Range: 40,000 – 120,000 MAD
+
+---
+
+SAAS DEVELOPMENT
+
+SaaS MVP (Minimum Viable Product):
+- Core features only
+- Authentication system
+- Basic dashboard
+Range: 30,000 – 60,000 MAD
+
+SaaS Growth Phase:
+- Advanced features
+- API integrations
+- Scalability improvements
+Range: 60,000 – 150,000 MAD+
+
+---
+
+AUTOMATION SYSTEMS
+
+Basic Automation:
+- Task automation
+- Simple integrations
+Range: 5,000 – 15,000 MAD
+
+Advanced Automation:
+- Multi-step workflows
+- API integrations
+- Notifications and triggers
+Range: 15,000 – 50,000 MAD
+
+---
+
+AI SOLUTIONS
+
+AI Chatbot (Basic):
+- Website chatbot
+- FAQ responses
+Range: 5,000 – 15,000 MAD
+
+Advanced AI System:
+- Custom AI workflows
+- Data analysis or automation
+Range: 15,000 – 60,000 MAD
+
+---
+
+E-COMMERCE ADDITIONS
+
+Product Management System:
+- 3,000 – 10,000 MAD
+
+Payment Integration:
+- 2,000 – 8,000 MAD
+
+Inventory Management:
+- 3,000 – 12,000 MAD
+
+---
+
+ADD-ONS & FEATURES
+
+Admin Dashboard:
+- 5,000 – 20,000 MAD
+
+WhatsApp Integration:
+- 2,000 – 10,000 MAD
+
+SMS/Email Notifications:
+- 2,000 – 8,000 MAD
+
+API Integrations:
+- 3,000 – 15,000 MAD
+
+Analytics & Reporting:
+- 5,000 – 20,000 MAD
+
+---
+
+IMPORTANT NOTES
+
+- Prices vary depending on complexity and requirements
+- Each project is customized
+- Larger systems require a discovery phase
+- Starting with an MVP is recommended to reduce initial cost
+- Projects can be built in phases to match your budget
+
+---
+
+SMARTDEX APPROACH
+
+We focus on:
+- Building scalable solutions
+- Delivering real business value
+- Helping you grow and automate your business
+
+We usually recommend starting simple, then improving the system as your business evolves.
