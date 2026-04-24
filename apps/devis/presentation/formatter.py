@@ -90,11 +90,11 @@ def format_generated_quote(devis_request, pipeline_result: dict) -> dict:
             "qualification": estimate.get("qualification"),
         },
         "estimate": {
-            "range_min": estimate.get("estimated_range_min"),
-            "range_max": estimate.get("estimated_range_max"),
+            "range_min": estimate.get("estimated_range_min", 0) or 0,
+            "range_max": estimate.get("estimated_range_max", 0) or 0,
             "currency": estimate.get("currency", quote.get("currency", "MAD")),
             "cost_drivers": estimate.get("cost_drivers", []),
-            "recommendation": estimate.get("recommendation"),
+            "recommendation": estimate.get("recommendation") or "",
         },
         "quote": {
             "included_groups": included_groups,

@@ -9,7 +9,7 @@ class DevisRequestCreateSerializer(serializers.ModelSerializer):
 
 
 class QuoteItemSerializer(serializers.Serializer):
-    key = serializers.CharField()
+    key = serializers.CharField(allow_null=True, required=False)
     label = serializers.CharField()
     description = serializers.CharField()
     category = serializers.CharField()
@@ -55,8 +55,42 @@ class QuoteSerializer(serializers.Serializer):
     missing_information = serializers.ListField(child=serializers.CharField())
 
 
+class ChatContextMessageSerializer(serializers.Serializer):
+    role = serializers.CharField()
+    content = serializers.CharField()
+
+
+class GenerateDevisFromChatSerializer(serializers.Serializer):
+    messages = ChatContextMessageSerializer(many=True, required=False)
+    description = serializers.CharField(required=False, allow_blank=True)
+    client_name = serializers.CharField(required=False, allow_blank=True)
+    client_email = serializers.EmailField(required=False, allow_blank=True)
+    client_phone = serializers.CharField(required=False, allow_blank=True)
+    preferred_language = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        messages = attrs.get("messages") or []
+        description = (attrs.get("description") or "").strip()
+        if not messages and not description:
+            raise serializers.ValidationError(
+                "At least one of messages or description is required."
+            )
+        return attrs
+
+
 class GeneratedQuoteResponseSerializer(serializers.Serializer):
     request_id = serializers.IntegerField()
     status = serializers.CharField()
     estimate = EstimateSerializer()
     quote = QuoteSerializer()
+    pdf_url = serializers.CharField(required=False, allow_null=True)
+    clarification_questions = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )
+    selected_features = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        default=list,
+    )

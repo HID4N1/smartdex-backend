@@ -1,32 +1,62 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from apps.devis.agents.orchestrator import DevisOrchestrator
 from apps.devis.models import DevisRequest
-from core.pricing.service import DevisService as CoreDevisService
-from apps.devis.presentation.formatter import format_generated_quote
+
+logger = logging.getLogger(__name__)
+
 
 class DevisService:
     def __init__(self):
-        self.pricing_service = CoreDevisService()
+        self.orchestrator = DevisOrchestrator()
 
-    def _build_pipeline_hints(self, devis_request: DevisRequest) -> dict:
-        return {
-            "budget_range": devis_request.budget_range,
-            "timeline": devis_request.timeline,
-            "project_type": devis_request.project_type,
-            "preferred_language": devis_request.preferred_language,
-            "features": devis_request.features or [],
-        }
-
-    def generate_quote_from_request(self, devis_request: DevisRequest) -> dict:
-        hints = self._build_pipeline_hints(devis_request)
-
-        pipeline_result = self.pricing_service.generate_devis(
-            description=devis_request.description,
-            project_type_hint=devis_request.project_type or None,
-            selected_features=devis_request.features or None,
-            budget_hint=devis_request.budget_range or None,
-            deadline_hint=devis_request.timeline or None,
+    def create_request_from_description(
+        self,
+        *,
+        description: str,
+        client_name: str = "",
+        client_email: str = "",
+        client_phone: str = "",
+        preferred_language: str = "",
+    ) -> DevisRequest:
+        return DevisRequest.objects.create(
+            description=description,
+            client_name=client_name,
+            client_email=client_email,
+            client_phone=client_phone,
+            preferred_language=preferred_language,
         )
 
-        devis_request.status = "processed"
-        devis_request.save(update_fields=["status", "updated_at"])
+    def generate_quote_from_request(self, devis_request: DevisRequest) -> dict:
+        state, response_payload = self.orchestrator.run(devis_request)
 
-        return format_generated_quote(devis_request, pipeline_result)
+        new_status = state.metadata.status
+        valid_statuses = {choice for choice, _ in DevisRequest.STATUS_CHOICES}
+        if new_status in valid_statuses and devis_request.status != new_status:
+            devis_request.status = new_status
+            devis_request.save(update_fields=["status", "updated_at"])
+        elif new_status not in valid_statuses:
+            logger.info(
+                "Skipping unsupported request status transition for request_id=%s: %s",
+                devis_request.id,
+                new_status,
+            )
+
+        if response_payload.get("status") == "failed":
+            logger.error(
+                "Devis generation failed for request_id=%s; errors=%s",
+                devis_request.id,
+                state.metadata.errors,
+            )
+
+        return response_payload
+
+    def get_pdf_file_path(self, devis_request: DevisRequest) -> Path | None:
+        pdf_name = f"devis_{devis_request.id}.pdf"
+        temp_path = Path("/tmp") / pdf_name
+        if temp_path.exists():
+            return temp_path
+        return None
