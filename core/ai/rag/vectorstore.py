@@ -1,13 +1,12 @@
 import chromadb
-from chromadb.config import Settings
+from django.conf import settings
 from openai import OpenAI
 import os
 
 class VectorStore:
-    def __init__(self, persist_directory: str = "chroma_db"):
+    def __init__(self):
         self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            path=settings.CHROMA_DIR
         )
 
         self.collection = self.client.get_or_create_collection(

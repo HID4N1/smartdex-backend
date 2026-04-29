@@ -1,4 +1,13 @@
+import os
 import uuid
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
+import django
+from django.conf import settings
+
+django.setup()
+
 from core.ai.rag.loader import load_txt_files
 from core.ai.rag.vectorstore import VectorStore
 from core.utils.clean_text import clean_text
@@ -6,9 +15,9 @@ from core.utils.chunker import chunk_text
 from core.utils.validators import is_valid_text
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(settings.BASE_DIR / ".env")
 
-DOCUMENTS_PATH = "static/documents"
+DOCUMENTS_PATH = settings.BASE_DIR / "static" / "documents"
 
 
 def get_doc_type(filename: str) -> str:
@@ -73,13 +82,14 @@ def build_chunks(documents):
 
 
 def ingest():
-    print("Loading documents...")
+    print(f"CHROMA_DIR: {settings.CHROMA_DIR}")
+    print(f"Loading documents from {DOCUMENTS_PATH}...")
 
     documents = load_txt_files(DOCUMENTS_PATH)
-    print(f"Loaded {len(documents)} files")
+    print(f"Loaded {len(documents)} documents")
 
     chunks = build_chunks(documents)
-    print(f"Generated {len(chunks)} chunks")
+    print(f"Created {len(chunks)} chunks")
 
     vectorstore = VectorStore()
 
@@ -91,7 +101,7 @@ def ingest():
 
     vectorstore.add_documents(ids, texts, metadatas)
 
-    print("Ingestion complete!")
+    print("Ingestion complete. SmartDex knowledge base stored successfully.")
 
 
 if __name__ == "__main__":

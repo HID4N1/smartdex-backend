@@ -1,6 +1,6 @@
 from typing import List, Dict, Optional
 import chromadb
-from chromadb.config import Settings
+from django.conf import settings
 from openai import OpenAI
 import os
 
@@ -8,14 +8,12 @@ import os
 class Retriever:
     def __init__(
         self,
-        persist_directory: str = "chroma_db",
         collection_name: str = "smartdex_kb"
     ):
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
         self.client = chromadb.PersistentClient(
-            path=persist_directory,
-            settings=Settings(anonymized_telemetry=False)
+            path=settings.CHROMA_DIR
         )
 
         self.collection = self.client.get_or_create_collection(
