@@ -5,6 +5,7 @@ from pathlib import Path
 
 from apps.devis.agents.orchestrator import DevisOrchestrator
 from apps.devis.models import DevisRequest
+from core.utils.privacy import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class DevisService:
             logger.error(
                 "Devis generation failed for request_id=%s; errors=%s",
                 devis_request.id,
-                state.metadata.errors,
+                sanitize_for_log(state.metadata.errors),
             )
 
         return response_payload

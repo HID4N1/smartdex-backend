@@ -257,6 +257,36 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
 
     @patch("apps.devis.views.DevisService")
+    def test_anonymous_generate_with_header_token_succeeds(self, service_class):
+        devis_request = self.create_devis_request()
+        service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
+
+        response = self.client.post(
+            f"/api/devis/requests/{devis_request.id}/generate/",
+            format="json",
+            HTTP_X_DEVIS_ACCESS_TOKEN=str(devis_request.access_token),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["request_id"], devis_request.id)
+        service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
+
+    @patch("apps.devis.views.DevisService")
+    def test_anonymous_generate_with_body_token_succeeds(self, service_class):
+        devis_request = self.create_devis_request()
+        service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
+
+        response = self.client.post(
+            f"/api/devis/requests/{devis_request.id}/generate/",
+            {"access_token": str(devis_request.access_token)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["request_id"], devis_request.id)
+        service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
+
+    @patch("apps.devis.views.DevisService")
     def test_anonymous_generate_with_wrong_token_fails(self, service_class):
         devis_request = self.create_devis_request()
 
@@ -532,6 +562,11 @@ class DevisAIPrivacyTests(TestCase):
         result = DevisService().generate_quote_from_request(devis_request)
 
         self.assertEqual(result["status"], "processed")
+        self.assertEqual(
+            result["pdf_url"],
+            f"/api/devis/requests/{devis_request.id}/generate/?format=pdf",
+        )
+        self.assertNotIn(str(devis_request.access_token), result["pdf_url"])
         combined_prompt = "\n".join(captured_prompts.values())
         self.assert_no_private_values(combined_prompt, devis_request)
         self.assertIn("booking website", combined_prompt)
@@ -549,6 +584,34 @@ class DevisAIPrivacyTests(TestCase):
         self.assertEqual(devis_request.client_name, "Fatima Zahra")
         self.assertEqual(devis_request.client_email, "fatima@example.com")
         self.assertEqual(devis_request.client_phone, "+212600000000")
+
+    @patch("apps.devis.views.DevisService")
+    def test_generate_from_chat_exception_log_redacts_sensitive_values(self, service_class):
+        raw_token = "123e4567-e89b-12d3-a456-426614174000"
+        raw_key = "sk-abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ123456"
+        service_class.return_value.create_request_from_description.side_effect = ValueError(
+            "failed for fatima@example.com +212600000000 "
+            f"/api/devis/requests/7/generate/?format=pdf&token={raw_token} {raw_key}"
+        )
+
+        with self.assertLogs("apps.devis.views", level="ERROR") as logs:
+            response = self.client.post(
+                "/api/devis/generate-from-chat/",
+                {
+                    "client_name": "Fatima Zahra",
+                    "client_email": "fatima@example.com",
+                    "client_phone": "+212600000000",
+                    "description": "booking website with payments and notifications",
+                },
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, 500, response.content)
+        logged = "\n".join(logs.output)
+        self.assertNotIn("fatima@example.com", logged)
+        self.assertNotIn("+212600000000", logged)
+        self.assertNotIn(raw_token, logged)
+        self.assertNotIn(raw_key, logged)
 
     @patch("apps.devis.agents.orchestrator.DevisPDFGenerator.generate")
     @patch.object(LLMService, "generate_quote_text")

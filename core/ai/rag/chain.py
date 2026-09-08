@@ -12,7 +12,7 @@ from apps.chatbot.services.prompting import PromptBuilder
 from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
 from apps.chatbot.services.validation import ResponseValidator
 from core.ai.rag.retriever import Retriever
-from core.utils.privacy import redact_for_ai, redact_pii_text
+from core.utils.privacy import redact_for_ai, redact_pii_text, sanitize_for_log
 from core.utils.validators import sanitize_query
 
 
@@ -503,7 +503,7 @@ If the latest message is already clear on its own, return it unchanged.
                 filter_metadata=filter_metadata,
             )
         except Exception as e:
-            logger.exception("Retriever failed: %s", e)
+            logger.error("Retriever failed: %s", sanitize_for_log(str(e)))
             return {
                 "query": clean_query,
                 "rewritten_query": rewritten_query,
@@ -575,7 +575,10 @@ If the latest message is already clear on its own, return it unchanged.
                         structured_state=structured_state,
                     )
         except Exception as e:
-            logger.warning("LLM generation failed. Using local fallback answer: %s", e)
+            logger.warning(
+                "LLM generation failed. Using local fallback answer: %s",
+                sanitize_for_log(str(e)),
+            )
             answer = self._generate_local_fallback(
                 state_policy,
                 decision,

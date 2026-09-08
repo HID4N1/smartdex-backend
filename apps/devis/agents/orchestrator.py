@@ -16,6 +16,7 @@ from apps.devis.services.ai_input_builder import DevisAIInputBuilder
 from apps.devis.services.pdf_context_builder import PDFContextBuilder
 from apps.devis.services.pdf_generator import DevisPDFGenerator
 from core.pricing.service import DevisService as CorePricingService
+from core.utils.privacy import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +82,13 @@ class DevisOrchestrator:
                 state.pdf.path = str(generated_path)
                 state.pdf.url = (
                     f"{reverse('devis-generate', kwargs={'pk': devis_request.id})}"
-                    f"?format=pdf&token={devis_request.access_token}"
+                    "?format=pdf"
                 )
             except Exception as exc:
-                logger.exception(
+                logger.error(
                     "PDF generation failed for request_id=%s: %s",
                     getattr(devis_request, "id", None),
-                    exc,
+                    sanitize_for_log(str(exc)),
                 )
                 state.pdf.generated = False
                 state.pdf.path = None
@@ -106,10 +107,10 @@ class DevisOrchestrator:
                 "selected_features": state.planning.selected_features,
             }
         except Exception as exc:
-            logger.exception(
+            logger.error(
                 "Devis orchestrator failed for request_id=%s: %s",
                 getattr(devis_request, "id", None),
-                exc,
+                sanitize_for_log(str(exc)),
             )
             state.metadata.errors.append("Unable to process this devis request right now.")
             state.metadata.status = "failed"

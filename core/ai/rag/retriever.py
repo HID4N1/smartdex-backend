@@ -7,6 +7,8 @@ import logging
 import re
 import unicodedata
 
+from core.utils.privacy import sanitize_for_log
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,10 @@ class Retriever:
                 where=filter_metadata
             )
         except Exception as exc:
-            logger.warning("Embedding search failed. Falling back to lexical search: %s", exc)
+            logger.warning(
+                "Embedding search failed. Falling back to lexical search: %s",
+                sanitize_for_log(str(exc)),
+            )
             return self._lexical_search(
                 query=query,
                 top_k=top_k,

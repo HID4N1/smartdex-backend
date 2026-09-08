@@ -41,12 +41,12 @@ def env_bool(name, default=False):
 
 def env_int(name, default=0):
     value = os.getenv(name)
-    if value is None:
+    if value is None or not value.strip():
         return default
     try:
         return int(value.strip())
     except ValueError:
-        return default
+        raise ImproperlyConfigured(f"{name} must be an integer.")
 
 
 def env_list(name, default=None):
@@ -91,6 +91,7 @@ DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS = [
     "https://www.smartdex.ma",
 ]
 CHROMA_DIR = os.getenv("CHROMA_DIR", str(BASE_DIR / "chroma_db"))
+OPENAI_API_KEY = env_str("OPENAI_API_KEY")
 
 
 # Quick-start development settings - unsuitable for production
@@ -149,6 +150,7 @@ CORS_ALLOW_HEADERS = [
     "origin",
     "user-agent",
     "x-csrftoken",
+    "x-devis-access-token",
     "x-requested-with",
 ]
 
@@ -252,6 +254,11 @@ DATABASE_URL = (
     if "DATABASE_URL" in LOCAL_ENV
     else os.getenv("DATABASE_URL")
 )
+if IS_PRODUCTION:
+    require_production_setting(
+        bool(DATABASE_URL),
+        "DATABASE_URL must be set when DEBUG is false.",
+    )
 
 if DATABASE_URL:
     DATABASES = {

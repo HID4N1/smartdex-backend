@@ -27,12 +27,27 @@ wheels/
 *.log
 local_settings.py
 db.sqlite3
+*.sqlite3
+*.sqlite
 /media/
 staticfiles/
 
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
+
+# Secrets and local exports
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+*.dump
+*.sql
+*.bak
 
 # IDE
 .vscode/
@@ -50,4 +65,3 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 chroma_db/
-

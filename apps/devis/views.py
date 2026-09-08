@@ -20,6 +20,7 @@ from apps.devis.serializers import (
     GeneratedQuoteResponseSerializer,
 )
 from apps.devis.services.devis_services import DevisService
+from core.utils.privacy import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,11 @@ def _get_devis_request_for_generation(request, pk: int) -> DevisRequest:
     if _is_staff_request(request):
         return get_object_or_404(DevisRequest, pk=pk)
 
-    token = request.query_params.get("token")
+    token = (
+        request.headers.get("X-Devis-Access-Token")
+        or request.data.get("access_token")
+        or request.query_params.get("token")
+    )
     if not token:
         raise Http404
 
@@ -153,8 +158,11 @@ class GenerateDevisFromChatView(APIView):
                 preferred_language=data.get("preferred_language", ""),
             )
             result = service.generate_quote_from_request(devis_request)
-        except Exception:
-            logger.exception("Unexpected error while generating devis from chat context.")
+        except Exception as exc:
+            logger.error(
+                "Unexpected error while generating devis from chat context: %s",
+                sanitize_for_log(str(exc)),
+            )
             return Response(
                 {
                     "request_id": None,
