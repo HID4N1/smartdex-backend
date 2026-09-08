@@ -34,11 +34,11 @@ def _get_devis_request_for_generation(request, pk: int) -> DevisRequest:
     if _is_staff_request(request):
         return get_object_or_404(DevisRequest, pk=pk)
 
-    token = (
-        request.headers.get("X-Devis-Access-Token")
-        or request.data.get("access_token")
-        or request.query_params.get("token")
-    )
+    token = request.headers.get("X-Devis-Access-Token")
+    output_format = request.query_params.get("format", "json").lower()
+
+    if not token and output_format != "pdf":
+        token = request.data.get("access_token")
     if not token:
         raise Http404
 

@@ -64,7 +64,7 @@ def processed_quote_result(devis_request):
             "notes": [],
             "missing_information": [],
         },
-        "pdf_url": f"/api/devis/requests/{devis_request.id}/generate/?format=pdf&token={devis_request.access_token}",
+        "pdf_url": f"/api/devis/requests/{devis_request.id}/generate/?format=pdf",
         "clarification_questions": [],
         "selected_features": [],
     }
@@ -242,7 +242,7 @@ class DevisRequestSecurityTests(TestCase):
         self.assertEqual(self.client.delete(self.create_url).status_code, 405)
 
     @patch("apps.devis.views.DevisService")
-    def test_anonymous_generate_with_correct_id_and_token_succeeds(self, service_class):
+    def test_anonymous_generate_with_query_token_fails(self, service_class):
         devis_request = self.create_devis_request()
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
 
@@ -251,10 +251,21 @@ class DevisRequestSecurityTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["request_id"], devis_request.id)
-        self.assertEqual(response.json()["access_token"], str(devis_request.access_token))
-        service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
+        self.assertEqual(response.status_code, 404, response.content)
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
+    def test_anonymous_generate_with_query_token_and_correct_id_fails(self, service_class):
+        devis_request = self.create_devis_request()
+        service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
+
+        response = self.client.post(
+            f"/api/devis/requests/{devis_request.id}/generate/?format=json&token={devis_request.access_token}",
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404, response.content)
+        service_class.return_value.generate_quote_from_request.assert_not_called()
 
     @patch("apps.devis.views.DevisService")
     def test_anonymous_generate_with_header_token_succeeds(self, service_class):
@@ -287,12 +298,13 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
 
     @patch("apps.devis.views.DevisService")
-    def test_anonymous_generate_with_wrong_token_fails(self, service_class):
+    def test_anonymous_generate_with_wrong_header_token_fails(self, service_class):
         devis_request = self.create_devis_request()
 
         response = self.client.post(
-            f"/api/devis/requests/{devis_request.id}/generate/?token={uuid.uuid4()}",
+            f"/api/devis/requests/{devis_request.id}/generate/",
             format="json",
+            HTTP_X_DEVIS_ACCESS_TOKEN=str(uuid.uuid4()),
         )
 
         self.assertEqual(response.status_code, 404, response.content)
@@ -316,8 +328,9 @@ class DevisRequestSecurityTests(TestCase):
         other_request = self.create_devis_request(client_email="second@example.com")
 
         response = self.client.post(
-            f"/api/devis/requests/{devis_request.id}/generate/?token={other_request.access_token}",
+            f"/api/devis/requests/{devis_request.id}/generate/",
             format="json",
+            HTTP_X_DEVIS_ACCESS_TOKEN=str(other_request.access_token),
         )
 
         self.assertEqual(response.status_code, 404, response.content)
@@ -336,15 +349,16 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_not_called()
 
     @patch("apps.devis.views.DevisService")
-    def test_anonymous_pdf_with_correct_id_and_token_succeeds(self, service_class):
+    def test_anonymous_pdf_with_header_token_succeeds(self, service_class):
         devis_request = self.create_devis_request()
         pdf_path = Path(tempfile.gettempdir()) / f"devis_{devis_request.id}.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\nsecure devis\n")
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
 
         response = self.client.post(
-            f"/api/devis/requests/{devis_request.id}/generate/?format=pdf&token={devis_request.access_token}",
+            f"/api/devis/requests/{devis_request.id}/generate/?format=pdf",
             format="json",
+            HTTP_X_DEVIS_ACCESS_TOKEN=str(devis_request.access_token),
         )
 
         self.assertEqual(response.status_code, 200)
@@ -352,9 +366,22 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
 
     @patch("apps.devis.views.DevisService")
+    def test_anonymous_pdf_with_body_token_fails(self, service_class):
+        devis_request = self.create_devis_request()
+
+        response = self.client.post(
+            f"/api/devis/requests/{devis_request.id}/generate/?format=pdf",
+            {"access_token": str(devis_request.access_token)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404, response.content)
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
     def test_devis_generate_rejects_unsupported_methods(self, service_class):
         devis_request = self.create_devis_request()
-        url = f"/api/devis/requests/{devis_request.id}/generate/?token={devis_request.access_token}"
+        url = f"/api/devis/requests/{devis_request.id}/generate/"
 
         self.assertEqual(self.client.get(url).status_code, 405)
         self.assertEqual(self.client.put(url, {}, format="json").status_code, 405)
@@ -757,11 +784,12 @@ class PublicEndpointThrottleTests(TestCase):
     def test_devis_generation_returns_429_and_skips_service_after_limit(self, service_class):
         devis_request = self.create_devis_request()
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
-        url = f"/api/devis/requests/{devis_request.id}/generate/?token={devis_request.access_token}"
+        url = f"/api/devis/requests/{devis_request.id}/generate/"
+        headers = {"HTTP_X_DEVIS_ACCESS_TOKEN": str(devis_request.access_token)}
 
-        self.client.post(url, format="json")
-        self.client.post(url, format="json")
-        response = self.client.post(url, format="json")
+        self.client.post(url, format="json", **headers)
+        self.client.post(url, format="json", **headers)
+        response = self.client.post(url, format="json", **headers)
 
         self.assertEqual(response.status_code, 429, response.content)
         self.assertEqual(service_class.return_value.generate_quote_from_request.call_count, 2)
@@ -796,10 +824,11 @@ class PublicEndpointThrottleTests(TestCase):
     def test_authenticated_staff_uses_user_bucket_not_anonymous_ip_bucket(self, service_class):
         devis_request = self.create_devis_request()
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
-        url = f"/api/devis/requests/{devis_request.id}/generate/?token={devis_request.access_token}"
-        self.client.post(url, format="json")
-        self.client.post(url, format="json")
-        anonymous_blocked = self.client.post(url, format="json")
+        url = f"/api/devis/requests/{devis_request.id}/generate/"
+        headers = {"HTTP_X_DEVIS_ACCESS_TOKEN": str(devis_request.access_token)}
+        self.client.post(url, format="json", **headers)
+        self.client.post(url, format="json", **headers)
+        anonymous_blocked = self.client.post(url, format="json", **headers)
 
         user = get_user_model().objects.create_user(
             username="staff",
