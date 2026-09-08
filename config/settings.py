@@ -14,15 +14,22 @@ from pathlib import Path
 from dotenv import dotenv_values, load_dotenv
 import os
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from core.utils.public_input_validation import PUBLIC_JSON_BODY_LIMIT_BYTES
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 ENV_FILE = BASE_DIR / ".env"
-LOCAL_ENV = dotenv_values(ENV_FILE)
-
-load_dotenv(ENV_FILE)
+LOAD_DOTENV = os.getenv("DJANGO_LOAD_DOTENV", "true").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+LOCAL_ENV = dotenv_values(ENV_FILE) if LOAD_DOTENV else {}
+if LOAD_DOTENV:
+    load_dotenv(ENV_FILE)
 
 
 def env_bool(name, default=False):
@@ -49,11 +56,39 @@ def env_list(name, default=None):
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def env_str(name, default=""):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip()
+
+
+def origins_from_hosts(hosts):
+    origins = []
+    for host in hosts:
+        if host in {"*", "localhost", "127.0.0.1", "[::1]"}:
+            continue
+        if host.startswith("."):
+            continue
+        origins.append(f"https://{host}")
+    return origins
+
+
+def require_production_setting(condition, message):
+    if not condition:
+        raise ImproperlyConfigured(message)
+
+
 DEFAULT_SECRET_KEY = "l;skndflknsdFO;SDFLSKFNBSLAKFSL,DJF"
+PLACEHOLDER_SECRET_KEYS = {DEFAULT_SECRET_KEY, "change-me", "changeme"}
 DEFAULT_ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+]
+DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS = [
+    "https://smartdex.ma",
+    "https://www.smartdex.ma",
 ]
 CHROMA_DIR = os.getenv("CHROMA_DIR", str(BASE_DIR / "chroma_db"))
 
@@ -61,18 +96,49 @@ CHROMA_DIR = os.getenv("CHROMA_DIR", str(BASE_DIR / "chroma_db"))
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY)
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env_bool("DEBUG", default=True)
+DEBUG = env_bool("DJANGO_DEBUG", default=env_bool("DEBUG", default=True))
+IS_PRODUCTION = not DEBUG
+DEPLOYMENT_ENVIRONMENT = env_str("DJANGO_ENV") or env_str("RAILWAY_ENVIRONMENT")
+IS_RAILWAY_DEPLOYMENT = any(
+    env_str(name)
+    for name in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID")
+)
+if DEBUG and (
+    IS_RAILWAY_DEPLOYMENT or DEPLOYMENT_ENVIRONMENT.lower() in {"production", "prod"}
+):
+    raise ImproperlyConfigured(
+        "DJANGO_DEBUG must be false for Railway or production deployments."
+    )
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = env_str("DJANGO_SECRET_KEY") or env_str("SECRET_KEY")
+if not SECRET_KEY and DEBUG:
+    SECRET_KEY = DEFAULT_SECRET_KEY
+
+if IS_PRODUCTION:
+    require_production_setting(
+        SECRET_KEY and SECRET_KEY not in PLACEHOLDER_SECRET_KEYS,
+        "DJANGO_SECRET_KEY or SECRET_KEY must be set to a non-placeholder value when DEBUG is false.",
+    )
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=DEFAULT_ALLOWED_HOSTS)
+if IS_PRODUCTION:
+    require_production_setting(
+        ALLOWED_HOSTS and "*" not in ALLOWED_HOSTS,
+        "ALLOWED_HOSTS must list explicit production hostnames when DEBUG is false.",
+    )
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
-    default=DEFAULT_CORS_ALLOWED_ORIGINS,
+    default=(
+        DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS
+        if IS_PRODUCTION
+        else DEFAULT_CORS_ALLOWED_ORIGINS
+    ),
 )
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", default=False)
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -95,9 +161,10 @@ CORS_ALLOW_METHODS = [
     "PUT",
 ]
 
-CSRF_TRUSTED_ORIGINS = [
-    "https://*.onrender.com",
-]
+CSRF_TRUSTED_ORIGINS = env_list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=origins_from_hosts(ALLOWED_HOSTS) if IS_PRODUCTION else [],
+)
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = PUBLIC_JSON_BODY_LIMIT_BYTES
 FILE_UPLOAD_MAX_MEMORY_SIZE = 1 * 1024 * 1024
@@ -144,9 +211,9 @@ REST_FRAMEWORK = {
 }
 
 MIDDLEWARE = [
-    "core.middleware.RequestBodySizeLimitMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
+    "corsheaders.middleware.CorsMiddleware",
+    "core.middleware.RequestBodySizeLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -255,4 +322,24 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_PROTO = env_bool("USE_X_FORWARDED_PROTO", default=IS_PRODUCTION)
+if USE_X_FORWARDED_PROTO:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_PRODUCTION)
+SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", default=3600 if IS_PRODUCTION else 0)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    default=False,
+)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", default=False)
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+SESSION_COOKIE_SECURE = IS_PRODUCTION
+CSRF_COOKIE_SECURE = IS_PRODUCTION
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = env_str("SESSION_COOKIE_SAMESITE", default="Lax")
+CSRF_COOKIE_SAMESITE = env_str("CSRF_COOKIE_SAMESITE", default="Lax")
+X_FRAME_OPTIONS = "DENY"
