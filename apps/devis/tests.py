@@ -5,6 +5,7 @@ import uuid
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.conf import settings
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 from rest_framework.throttling import SimpleRateThrottle
@@ -126,6 +127,44 @@ class DevisRequestSecurityTests(TestCase):
         self.assertNotEqual(devis_request.access_token, supplied_token)
         self.assertEqual(devis_request.status, "pending")
 
+    def test_public_create_response_exposes_only_required_flow_fields(self):
+        response = self.client.post(self.create_url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(
+            set(response.json().keys()),
+            {"id", "access_token", "status", "message"},
+        )
+
+    def test_anonymous_list_retrieve_update_and_delete_are_not_available(self):
+        devis_request = self.create_devis_request()
+
+        list_response = self.client.get(self.create_url)
+        retrieve_response = self.client.get(f"/api/devis/requests/{devis_request.id}/")
+        put_response = self.client.put(
+            f"/api/devis/requests/{devis_request.id}/",
+            {"description": "Changed"},
+            format="json",
+        )
+        patch_response = self.client.patch(
+            f"/api/devis/requests/{devis_request.id}/",
+            {"description": "Changed"},
+            format="json",
+        )
+        delete_response = self.client.delete(f"/api/devis/requests/{devis_request.id}/")
+
+        self.assertEqual(list_response.status_code, 405, list_response.content)
+        self.assertEqual(retrieve_response.status_code, 404, retrieve_response.content)
+        self.assertEqual(put_response.status_code, 404, put_response.content)
+        self.assertEqual(patch_response.status_code, 404, patch_response.content)
+        self.assertEqual(delete_response.status_code, 404, delete_response.content)
+
+    def test_devis_create_rejects_unsupported_methods(self):
+        self.assertEqual(self.client.get(self.create_url).status_code, 405)
+        self.assertEqual(self.client.put(self.create_url, self.payload, format="json").status_code, 405)
+        self.assertEqual(self.client.patch(self.create_url, self.payload, format="json").status_code, 405)
+        self.assertEqual(self.client.delete(self.create_url).status_code, 405)
+
     @patch("apps.devis.views.DevisService")
     def test_anonymous_generate_with_correct_id_and_token_succeeds(self, service_class):
         devis_request = self.create_devis_request()
@@ -207,6 +246,27 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
 
     @patch("apps.devis.views.DevisService")
+    def test_devis_generate_rejects_unsupported_methods(self, service_class):
+        devis_request = self.create_devis_request()
+        url = f"/api/devis/requests/{devis_request.id}/generate/?token={devis_request.access_token}"
+
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.put(url, {}, format="json").status_code, 405)
+        self.assertEqual(self.client.patch(url, {}, format="json").status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
+    def test_generate_from_chat_rejects_unsupported_methods(self, service_class):
+        url = "/api/devis/generate-from-chat/"
+
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.put(url, {"description": "Need a site"}, format="json").status_code, 405)
+        self.assertEqual(self.client.patch(url, {"description": "Need a site"}, format="json").status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
     def test_staff_can_generate_without_token(self, service_class):
         devis_request = self.create_devis_request()
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
@@ -224,6 +284,38 @@ class DevisRequestSecurityTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
+
+
+class PublicEndpointAuthorizationPostureTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    def test_drf_default_permission_requires_authentication(self):
+        self.assertEqual(
+            settings.REST_FRAMEWORK["DEFAULT_PERMISSION_CLASSES"],
+            ["rest_framework.permissions.IsAuthenticated"],
+        )
+
+    def test_production_renderers_are_json_only(self):
+        self.assertEqual(
+            settings.REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"],
+            ["rest_framework.renderers.JSONRenderer"],
+        )
+
+    def test_admin_remains_staff_login_protected(self):
+        response = self.client.get("/admin/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login/", response["Location"])
+
+    def test_health_check_is_public_get_only(self):
+        get_response = self.client.get("/api/health/")
+        post_response = self.client.post("/api/health/", {}, format="json")
+
+        self.assertEqual(get_response.status_code, 200, get_response.content)
+        self.assertEqual(get_response.json(), {"status": "ok"})
+        self.assertEqual(post_response.status_code, 405, post_response.content)
 
 
 class DevisAIPrivacyTests(TestCase):

@@ -240,6 +240,35 @@ class ChatbotAPIRegressionTests(TestCase):
     def setUp(self):
         cache.clear()
 
+    def test_public_chat_response_exposes_only_expected_fields(self):
+        client = APIClient()
+        response = client.post("/api/chatbot/chat/", {"message": "bonjour"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            set(response.json().keys()),
+            {
+                "conversation_id",
+                "message_id",
+                "query",
+                "rewritten_query",
+                "intent",
+                "state",
+                "answer",
+                "sources",
+                "structured_state",
+                "runtime_trace",
+            },
+        )
+
+    def test_chatbot_unsupported_methods_fail(self):
+        client = APIClient()
+
+        self.assertEqual(client.get("/api/chatbot/chat/").status_code, 405)
+        self.assertEqual(client.put("/api/chatbot/chat/", {"message": "x"}, format="json").status_code, 405)
+        self.assertEqual(client.patch("/api/chatbot/chat/", {"message": "x"}, format="json").status_code, 405)
+        self.assertEqual(client.delete("/api/chatbot/chat/").status_code, 405)
+
     def test_greeting_stays_in_wait_for_project_without_qualification(self):
         client = APIClient()
         response = client.post("/api/chatbot/chat/", {"message": "bonjour"}, format="json")

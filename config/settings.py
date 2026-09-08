@@ -120,6 +120,9 @@ INSTALLED_APPS = [
 
 REST_FRAMEWORK = {
     "URL_FORMAT_OVERRIDE": None,
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
     "DEFAULT_THROTTLE_RATES": {
         "contact": os.getenv("THROTTLE_RATE_CONTACT", "5/hour"),
         "devis_create": os.getenv("THROTTLE_RATE_DEVIS_CREATE", "10/hour"),

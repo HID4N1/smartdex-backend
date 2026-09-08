@@ -63,6 +63,38 @@ class ContactMessageAPITests(TestCase):
 
         self.assertEqual(response.status_code, 201, response.content)
 
+    def test_public_response_exposes_only_acknowledgement(self):
+        response = self.client.post(self.url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(set(response.json().keys()), {"message"})
+
+    def test_anonymous_get_list_is_not_available(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 405, response.content)
+
+    def test_anonymous_retrieve_is_not_available(self):
+        ContactMessage.objects.create(
+            name="Fatima Zahra",
+            email="fatima@example.com",
+            subject="Nouveau projet",
+            message="Nous voulons creer un site web professionnel pour notre entreprise.",
+        )
+
+        response = self.client.get(f"{self.url}1/")
+
+        self.assertEqual(response.status_code, 404, response.content)
+
+    def test_anonymous_update_and_delete_are_not_available(self):
+        put_response = self.client.put(self.url, self.payload, format="json")
+        patch_response = self.client.patch(self.url, {"subject": "Changed"}, format="json")
+        delete_response = self.client.delete(self.url)
+
+        self.assertEqual(put_response.status_code, 405, put_response.content)
+        self.assertEqual(patch_response.status_code, 405, patch_response.content)
+        self.assertEqual(delete_response.status_code, 405, delete_response.content)
+
     def test_client_cannot_set_protected_fields(self):
         payload = {
             **self.payload,
