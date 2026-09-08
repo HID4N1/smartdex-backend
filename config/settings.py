@@ -11,14 +11,17 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 import os
 import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-load_dotenv(BASE_DIR / ".env")
+ENV_FILE = BASE_DIR / ".env"
+LOCAL_ENV = dotenv_values(ENV_FILE)
+
+load_dotenv(ENV_FILE)
 
 
 def env_bool(name, default=False):
@@ -35,7 +38,7 @@ def env_list(name, default=None):
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-DEFAULT_SECRET_KEY = "django-insecure-change-me"
+DEFAULT_SECRET_KEY = "l;skndflknsdFO;SDFLSKFNBSLAKFSL,DJF"
 DEFAULT_ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -149,13 +152,18 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = (
+    LOCAL_ENV.get("DATABASE_URL")
+    if "DATABASE_URL" in LOCAL_ENV
+    else os.getenv("DATABASE_URL")
+)
 
 if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.parse(
             DATABASE_URL,
             conn_max_age=600,
+            ssl_require=DATABASE_URL.startswith(("postgres://", "postgresql://")),
         )
     }
 else:

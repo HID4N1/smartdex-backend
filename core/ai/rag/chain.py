@@ -1,3 +1,4 @@
+from dataclasses import asdict
 from pathlib import Path
 from typing import List, Dict, Optional
 import logging
@@ -6,6 +7,10 @@ import unicodedata
 
 from openai import OpenAI
 
+from apps.chatbot.services.business_logic import BusinessLogicEngine
+from apps.chatbot.services.prompting import PromptBuilder
+from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
+from apps.chatbot.services.validation import ResponseValidator
 from core.ai.rag.retriever import Retriever
 from core.utils.validators import sanitize_query
 
@@ -58,6 +63,10 @@ class RAGChain:
         self.max_distance = max_distance
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.prompt_template = self._load_prompt(prompt_path)
+        self.business_logic = BusinessLogicEngine()
+        self.state_machine = SalesStateMachine()
+        self.prompt_builder = PromptBuilder()
+        self.validator = ResponseValidator()
 
     def _load_prompt(self, path: Optional[str] = None) -> str:
         if path:
@@ -121,7 +130,7 @@ class RAGChain:
 
     def _intent_filter(self, intent: str) -> Optional[Dict]:
         mapping = {
-            "pricing": {"doc_type": "pricing"},
+            "pricing": None,
             "technical": None,
             "services": None,
             "company": None,
@@ -194,20 +203,46 @@ If the latest message is already clear on its own, return it unchanged.
             max_docs = self.rerank_top_n
 
         query_terms = [term for term in self._normalize_text(query).split() if term.strip()]
+        source_priority = {
+            "01_identity.md": 13,
+            "02_company.md": 12,
+            "03_services.md": 12,
+            "04_pricing.md": 14,
+            "05_sales_playbook.md": 13,
+            "06_qualification.md": 13,
+            "07_objections.md": 11,
+            "08_case_studies.md": 8,
+            "09_process.md": 10,
+            "10_faq.md": 9,
+            "11_rules.md": 14,
+            "pricing_guide.txt": 12,
+            "pricing_breakdown.txt": 11,
+            "rules.txt": 10,
+            "qualification_flow.txt": 9,
+            "services_detailed.txt": 8,
+            "company_info.txt": 7,
+            "sales_style.txt": 6,
+            "objections.txt": 6,
+            "faq.txt": 5,
+            "use_cases.txt": 4,
+            "knowledge_base.txt": 1,
+        }
 
         def score(doc: Dict) -> tuple:
             text = self._normalize_text(doc.get("text", ""))
             metadata = doc.get("metadata", {})
             source = self._normalize_text(str(metadata.get("source", "")))
+            raw_source = Path(str(metadata.get("source", ""))).name
             doc_type = self._normalize_text(str(metadata.get("doc_type", "")))
             distance = doc.get("distance")
 
             text_score = sum(term in text for term in query_terms)
             source_score = sum(term in source for term in query_terms)
             type_score = sum(term in doc_type for term in query_terms)
+            priority_score = source_priority.get(raw_source, 0)
             distance_score = distance if distance is not None else 999999
 
-            return (text_score + source_score + type_score, -distance_score)
+            return (text_score + source_score + type_score, priority_score, -distance_score)
 
         ranked = sorted(docs, key=score, reverse=True)
         return ranked[:max_docs]
@@ -237,22 +272,32 @@ If the latest message is already clear on its own, return it unchanged.
             question=question,
         )
 
-    def _generate(self, prompt: str) -> str:
+    def _generate(self, messages: List[Dict], temperature: float = 0.2) -> str:
         response = self.client.chat.completions.create(
             model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a Smartdex AI assistant. Be accurate, grounded, natural, and sales-oriented.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            temperature=0.4,
+            messages=messages,
+            temperature=temperature,
+            top_p=0.8,
+            max_tokens=220,
         )
         return (response.choices[0].message.content or "").strip()
+
+    def _generate_local_fallback(self, state_policy: Dict, decision: Dict, allow_pricing: bool) -> str:
+        return self.validator.build_fallback(
+            state_policy=state_policy,
+            decision=decision,
+            allow_pricing=allow_pricing,
+        )
+
+    def _serialize_decision(self, decision) -> Dict:
+        data = asdict(decision)
+        data["recommended_service"] = decision.recommended_service
+        data["recommended_package"] = decision.recommended_package
+        data["recommended_next_step"] = decision.recommended_next_step
+        return data
+
+    def _pricing_allowed(self, state: ConversationState, decision: Dict) -> bool:
+        return state == ConversationState.PRICING and bool(decision.get("pricing"))
 
     def run(self, query: str, history: Optional[List[Dict]] = None) -> Dict:
         clean_query = sanitize_query(query)
@@ -269,6 +314,21 @@ If the latest message is already clear on its own, return it unchanged.
 
         rewritten_query = self._rewrite_query_with_history(clean_query, history)
         intent = self._detect_intent(rewritten_query)
+        decision_obj = self.business_logic.analyze(clean_query, history=history or [])
+        decision = self._serialize_decision(decision_obj)
+        state = self.state_machine.choose_state(
+            query=clean_query,
+            facts=decision.get("facts", {}),
+            history=history,
+        )
+        state_policy_obj = self.state_machine.policy_for(state)
+        state_policy = asdict(state_policy_obj)
+        allow_pricing = self._pricing_allowed(state, decision)
+
+        if not allow_pricing:
+            decision["pricing"] = None
+            decision["quote"] = None
+
         filter_metadata = self._intent_filter(intent)
 
         try:
@@ -304,20 +364,48 @@ If the latest message is already clear on its own, return it unchanged.
 
         history_text = self._build_history_text(history)
         context = self._build_context(docs)
-        prompt = self._build_prompt(history_text, context, clean_query)
+        messages = self.prompt_builder.build_messages(
+            state=state.value,
+            state_policy=state_policy,
+            decision=decision,
+            knowledge=context,
+            history=history,
+            user_message=clean_query,
+        )
 
         try:
-            answer = self._generate(prompt)
+            answer = self._generate(messages)
+            validation = self.validator.validate(
+                answer=answer,
+                decision=decision,
+                allow_pricing=allow_pricing,
+            )
+            if not validation.valid:
+                repair_messages = messages + [
+                    {
+                        "role": "assistant",
+                        "content": answer,
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Regenerate the response so it satisfies validation. "
+                            f"Validation failures: {validation.reasons}. "
+                            "Keep one question maximum and do not change business logic output."
+                        ),
+                    },
+                ]
+                answer = self._generate(repair_messages, temperature=0.1)
+                validation = self.validator.validate(
+                    answer=answer,
+                    decision=decision,
+                    allow_pricing=allow_pricing,
+                )
+                if not validation.valid:
+                    answer = self._generate_local_fallback(state_policy, decision, allow_pricing)
         except Exception as e:
-            logger.exception("LLM generation failed: %s", e)
-            return {
-                "query": clean_query,
-                "rewritten_query": rewritten_query,
-                "intent": intent,
-                "answer": "I found relevant information, but I could not generate a response right now.",
-                "sources": [d.get("metadata", {}) for d in docs],
-                "context_used": context,
-            }
+            logger.warning("LLM generation failed. Using local fallback answer: %s", e)
+            answer = self._generate_local_fallback(state_policy, decision, allow_pricing)
 
         return {
             "query": clean_query,
@@ -326,4 +414,6 @@ If the latest message is already clear on its own, return it unchanged.
             "answer": answer,
             "sources": [d.get("metadata", {}) for d in docs],
             "context_used": context,
+            "state": state.value,
+            "business_decision": decision,
         }

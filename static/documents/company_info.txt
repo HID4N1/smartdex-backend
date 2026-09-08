@@ -2,7 +2,7 @@ COMPANY INFORMATION — SMARTDEX
 
 [IDENTITY]
 Company Name: Smartdex
-Website: https://smartdex.ma
+Website: https://www.smartdex.ma
 Industry: SaaS, Artificial Intelligence, Web Application Development, Automation, Data Analytics
 Tagline: Smart systems for smarter businesses
 

@@ -28,7 +28,7 @@ wheels/
 local_settings.py
 db.sqlite3
 /media/
-/staticfiles/
+staticfiles/
 
 # Environment
 .env
@@ -50,3 +50,4 @@ Thumbs.db
 htmlcov/
 .pytest_cache/
 chroma_db/
+

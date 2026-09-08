@@ -1,5 +1,6 @@
 import os
 import uuid
+from pathlib import Path
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 
@@ -21,17 +22,34 @@ DOCUMENTS_PATH = settings.BASE_DIR / "static" / "documents"
 
 
 def get_doc_type(filename: str) -> str:
+    name = Path(filename).name
     mapping = {
+        "01_identity.md": "identity",
+        "02_company.md": "company",
+        "03_services.md": "services",
+        "04_pricing.md": "pricing",
+        "05_sales_playbook.md": "sales",
+        "06_qualification.md": "qualification",
+        "07_objections.md": "objections",
+        "08_case_studies.md": "case_studies",
+        "09_process.md": "process",
+        "10_faq.md": "faq",
+        "11_rules.md": "rules",
         "company_info.txt": "company",
         "faq.txt": "faq",
         "pricing_guide.txt": "pricing",
+        "pricing_breakdown.txt": "pricing",
         "pricing_info.txt": "pricing",
         "services_detailed.txt": "services",
         "rules.txt": "rules",
+        "qualification_flow.txt": "qualification",
+        "sales_style.txt": "sales",
+        "objections.txt": "objections",
+        "use_cases.txt": "case_studies",
         "technical_stack.txt": "technical",
         "knowledge_base.txt": "general",
     }
-    return mapping.get(filename, "general")
+    return mapping.get(name, "general")
 
 
 def get_chunking_config(doc_type: str) -> dict:
@@ -40,6 +58,12 @@ def get_chunking_config(doc_type: str) -> dict:
         "rules": {"chunk_size": 300, "overlap": 40},
         "pricing": {"chunk_size": 500, "overlap": 80},
         "services": {"chunk_size": 600, "overlap": 100},
+        "sales": {"chunk_size": 450, "overlap": 70},
+        "qualification": {"chunk_size": 420, "overlap": 60},
+        "objections": {"chunk_size": 420, "overlap": 60},
+        "identity": {"chunk_size": 350, "overlap": 50},
+        "case_studies": {"chunk_size": 550, "overlap": 80},
+        "process": {"chunk_size": 450, "overlap": 70},
         "technical": {"chunk_size": 700, "overlap": 120},
         "company": {"chunk_size": 450, "overlap": 70},
         "general": {"chunk_size": 550, "overlap": 90},
