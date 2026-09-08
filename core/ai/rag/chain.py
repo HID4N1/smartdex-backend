@@ -61,7 +61,8 @@ class RAGChain:
         self.rerank_top_n = rerank_top_n
         self.model = model
         self.max_distance = max_distance
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.client = OpenAI(api_key=self.api_key or "missing-openai-api-key")
         self.prompt_template = self._load_prompt(prompt_path)
         self.business_logic = BusinessLogicEngine()
         self.state_machine = SalesStateMachine()
@@ -155,6 +156,9 @@ class RAGChain:
         """
         Rewrite short follow-up messages into a standalone question using recent history.
         """
+        if not self.api_key:
+            return query
+
         if not history or len(query.split()) > 12:
             return query
 
@@ -282,11 +286,18 @@ If the latest message is already clear on its own, return it unchanged.
         )
         return (response.choices[0].message.content or "").strip()
 
-    def _generate_local_fallback(self, state_policy: Dict, decision: Dict, allow_pricing: bool) -> str:
+    def _generate_local_fallback(
+        self,
+        state_policy: Dict,
+        decision: Dict,
+        allow_pricing: bool,
+        structured_state: Optional[Dict] = None,
+    ) -> str:
         return self.validator.build_fallback(
             state_policy=state_policy,
             decision=decision,
             allow_pricing=allow_pricing,
+            structured_state=structured_state,
         )
 
     def _serialize_decision(self, decision) -> Dict:
@@ -299,7 +310,75 @@ If the latest message is already clear on its own, return it unchanged.
     def _pricing_allowed(self, state: ConversationState, decision: Dict) -> bool:
         return state == ConversationState.PRICING and bool(decision.get("pricing"))
 
-    def run(self, query: str, history: Optional[List[Dict]] = None) -> Dict:
+    def _prequalification_answer(self, intent: str) -> str:
+        if intent == "greeting":
+            return "Bonjour ! Comment puis-je vous aider aujourd’hui ?"
+        if intent == "thanks":
+            return "Avec plaisir. Comment puis-je vous aider aujourd’hui ?"
+        if intent == "small_talk":
+            return "Je vais très bien, merci. Comment puis-je vous aider aujourd’hui ?"
+        if intent == "company_question":
+            return (
+                "SmartDex accompagne les entreprises dans leurs projets digitaux: sites web, "
+                "applications, CRM, ERP, automatisation et solutions IA. Comment puis-je vous aider aujourd’hui ?"
+            )
+        if intent == "services_question":
+            return (
+                "SmartDex propose des sites web, applications web et mobiles, CRM, ERP, e-commerce, "
+                "automatisation et solutions IA. Quel projet souhaitez-vous explorer ?"
+            )
+        return "Comment puis-je vous aider aujourd’hui ?"
+
+    def _prequalification_result(
+        self,
+        *,
+        clean_query: str,
+        rewritten_query: str,
+        intent: str,
+        structured_state: Dict,
+        response_source: str,
+        conversation_id: Optional[str] = None,
+        is_new_conversation: Optional[bool] = None,
+    ) -> Dict:
+        structured_state["current_state"] = ConversationState.WAIT_FOR_PROJECT.value
+        structured_state["has_active_project"] = False
+        structured_state["missing_relevant_fields"] = []
+        structured_state["prequalification_intent"] = intent
+        answer = self._prequalification_answer(intent)
+        runtime_trace = {
+            "conversation_id": conversation_id,
+            "is_new_conversation": is_new_conversation,
+            "loaded_state": structured_state,
+            "current_state": ConversationState.WAIT_FOR_PROJECT.value,
+            "has_active_project": False,
+            "detected_intent": intent,
+            "selected_handler": response_source,
+            "qualification_selector_called": False,
+            "response_source": response_source,
+            "final_state": ConversationState.WAIT_FOR_PROJECT.value,
+        }
+        logger.info("chatbot_runtime_trace=%s", runtime_trace)
+        return {
+            "query": clean_query,
+            "rewritten_query": rewritten_query,
+            "intent": intent,
+            "answer": answer,
+            "sources": [],
+            "context_used": "",
+            "state": ConversationState.WAIT_FOR_PROJECT.value,
+            "business_decision": {},
+            "structured_state": structured_state,
+            "runtime_trace": runtime_trace,
+        }
+
+    def run(
+        self,
+        query: str,
+        history: Optional[List[Dict]] = None,
+        structured_state: Optional[Dict] = None,
+        conversation_id: Optional[str] = None,
+        is_new_conversation: Optional[bool] = None,
+    ) -> Dict:
         clean_query = sanitize_query(query)
 
         if not clean_query:
@@ -312,10 +391,51 @@ If the latest message is already clear on its own, return it unchanged.
                 "rewritten_query": query,
             }
 
+        loaded_state = self.business_logic.initial_state(structured_state)
+        rewritten_query = clean_query
+        prequalification_intent = self.business_logic.detect_prequalification_intent(clean_query)
+        if prequalification_intent == "greeting" and not loaded_state.get("has_active_project"):
+            return self._prequalification_result(
+                clean_query=clean_query,
+                rewritten_query=rewritten_query,
+                intent="greeting",
+                structured_state=loaded_state,
+                response_source="greeting_handler",
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+            )
+
+        if prequalification_intent == "small_talk" and not loaded_state.get("has_active_project"):
+            return self._prequalification_result(
+                clean_query=clean_query,
+                rewritten_query=rewritten_query,
+                intent="small_talk",
+                structured_state=loaded_state,
+                response_source="small_talk_handler",
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+            )
+
+        if not loaded_state.get("has_active_project") and not self.business_logic.detect_project_intent(clean_query):
+            return self._prequalification_result(
+                clean_query=clean_query,
+                rewritten_query=rewritten_query,
+                intent=prequalification_intent,
+                structured_state=loaded_state,
+                response_source="wait_for_project_handler",
+                conversation_id=conversation_id,
+                is_new_conversation=is_new_conversation,
+            )
+
         rewritten_query = self._rewrite_query_with_history(clean_query, history)
         intent = self._detect_intent(rewritten_query)
-        decision_obj = self.business_logic.analyze(clean_query, history=history or [])
+        decision_obj = self.business_logic.analyze(
+            clean_query,
+            history=history or [],
+            structured_state=loaded_state,
+        )
         decision = self._serialize_decision(decision_obj)
+        structured_state = decision.get("facts", {}).get("structured_state") or {}
         state = self.state_machine.choose_state(
             query=clean_query,
             facts=decision.get("facts", {}),
@@ -324,10 +444,52 @@ If the latest message is already clear on its own, return it unchanged.
         state_policy_obj = self.state_machine.policy_for(state)
         state_policy = asdict(state_policy_obj)
         allow_pricing = self._pricing_allowed(state, decision)
+        qualification_selector_called = bool(structured_state.get("has_active_project"))
+        structured_state["current_state"] = state.value
 
         if not allow_pricing:
             decision["pricing"] = None
             decision["quote"] = None
+
+        deterministic_answer = self._generate_local_fallback(
+            state_policy,
+            decision,
+            allow_pricing,
+            structured_state=structured_state,
+        )
+        if deterministic_answer and (
+            decision.get("missing_information")
+            or not structured_state.get("has_active_project")
+            or structured_state.get("just_activated_project")
+        ):
+            structured_state = self.business_logic.set_last_asked_field(
+                structured_state,
+                deterministic_answer,
+            )
+            decision["facts"]["structured_state"] = structured_state
+            return {
+                "query": clean_query,
+                "rewritten_query": rewritten_query,
+                "intent": intent,
+                "answer": deterministic_answer,
+                "sources": [],
+                "context_used": "",
+                "state": state.value,
+                "business_decision": decision,
+                "structured_state": structured_state,
+                "runtime_trace": {
+                    "conversation_id": conversation_id,
+                    "is_new_conversation": is_new_conversation,
+                    "loaded_state": loaded_state,
+                    "current_state": state.value,
+                    "has_active_project": bool(structured_state.get("has_active_project")),
+                    "detected_intent": intent,
+                    "selected_handler": "deterministic_qualification_fallback",
+                    "qualification_selector_called": qualification_selector_called,
+                    "response_source": "deterministic_fallback",
+                    "final_state": state.value,
+                },
+            }
 
         filter_metadata = self._intent_filter(intent)
 
@@ -379,6 +541,7 @@ If the latest message is already clear on its own, return it unchanged.
                 answer=answer,
                 decision=decision,
                 allow_pricing=allow_pricing,
+                structured_state=structured_state,
             )
             if not validation.valid:
                 repair_messages = messages + [
@@ -400,12 +563,27 @@ If the latest message is already clear on its own, return it unchanged.
                     answer=answer,
                     decision=decision,
                     allow_pricing=allow_pricing,
+                    structured_state=structured_state,
                 )
                 if not validation.valid:
-                    answer = self._generate_local_fallback(state_policy, decision, allow_pricing)
+                    answer = self._generate_local_fallback(
+                        state_policy,
+                        decision,
+                        allow_pricing,
+                        structured_state=structured_state,
+                    )
         except Exception as e:
             logger.warning("LLM generation failed. Using local fallback answer: %s", e)
-            answer = self._generate_local_fallback(state_policy, decision, allow_pricing)
+            answer = self._generate_local_fallback(
+                state_policy,
+                decision,
+                allow_pricing,
+                structured_state=structured_state,
+            )
+
+        structured_state = self.business_logic.set_last_asked_field(structured_state, answer)
+        structured_state["current_state"] = state.value
+        decision["facts"]["structured_state"] = structured_state
 
         return {
             "query": clean_query,
@@ -416,4 +594,17 @@ If the latest message is already clear on its own, return it unchanged.
             "context_used": context,
             "state": state.value,
             "business_decision": decision,
+            "structured_state": structured_state,
+            "runtime_trace": {
+                "conversation_id": conversation_id,
+                "is_new_conversation": is_new_conversation,
+                "loaded_state": loaded_state,
+                "current_state": state.value,
+                "has_active_project": bool(structured_state.get("has_active_project")),
+                "detected_intent": intent,
+                "selected_handler": "rag_llm",
+                "qualification_selector_called": qualification_selector_called,
+                "response_source": "llm_or_validated_fallback",
+                "final_state": state.value,
+            },
         }

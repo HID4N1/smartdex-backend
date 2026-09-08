@@ -1,7 +1,7 @@
 # Current Chatbot Backend Architecture Audit
 
 Audit date: 2026-07-29  
-Scope: SmartDex sales chatbot backend only. Adjacent quote/devis code is mentioned where it explains pricing behavior or shared AI patterns. No implementation changes were made.
+Scope: SmartDex sales chatbot backend only. Adjacent quote/devis code is mentioned where it explains pricing behavior or shared AI patterns. This document now includes the 2026-07-29 state-management remediation notes.
 
 ## Executive Summary
 
@@ -16,6 +16,172 @@ The biggest pricing issue is source fragmentation and priority ambiguity:
 - For pricing intent, retrieval filters to `doc_type=pricing`, so `pricing_breakdown.txt` is excluded.
 - The deterministic pricing engine in `core/pricing/` is not used by the chatbot.
 - The model is asked to produce prices from retrieved text, so it can blend incomplete retrieved pricing, prompt rules, and its own language-model priors.
+
+## 2026-07-29 State-Management Fix
+
+The failing showcase-site conversation exposed a state bug, not a prompt wording issue. Before the fix, `BusinessLogicEngine.extract_facts()` built facts from the current message plus recent assistant and user history. The project classifier then matched broad keywords from that combined text. Because SmartDex assistant responses often mention AI services and generic "systems", stale assistant wording could contaminate later turns. Corrections were not represented as first-class events, so an explicit "non" did not invalidate earlier inferred e-commerce or AI values.
+
+Structured conversation state is now persisted on `Conversation.structured_state` and recomputed after every turn. The durable schema separates concepts that were previously blended into generic fact fields:
+
+```python
+{
+    "language": "fr",
+    "industry": None,
+    "business_activity": None,
+    "legal_structure": None,
+    "requested_solution": None,
+    "project_type": None,
+    "requested_features": [],
+    "rejected_features": [],
+    "primary_objective": None,
+    "service_family": None,
+    "complexity": None,
+    "last_asked_field": None,
+    "asked_fields": [],
+    "completed_fields": [],
+    "invalidated_fields": [],
+    "missing_relevant_fields": [],
+    "correction_history": [],
+}
+```
+
+Extraction now reads the current user message semantically instead of blindly assigning it to `last_asked_field`. For example, if the assistant asks for the activity and the user answers `vitrine`, the extractor records `project_type = "showcase_website"` and leaves `industry` missing. The next question selector can then ask for the industry again because the answer advanced a different field.
+
+Classification rules are deterministic. `vente en ligne` maps to the `online_sales` feature and can drive an `ecommerce` project type while it is not rejected. `site vitrine` and `vitrine` map to `showcase_website`. `réservation en ligne` maps to `booking_feature`, `gestion de flotte` maps to `operational_management_feature`, and AI classifications require explicit AI signals such as `IA`, `intelligence artificielle`, `chatbot`, `assistant intelligent`, `OCR`, `agent IA`, or `machine learning`. Ordinary service words such as `vente`, `site`, `réservation`, `gestion`, `plateforme`, and `système` are not enough to select `ai_solution`.
+
+Corrections are detected deterministically with signals such as `non`, `ce n'est pas`, `je voulais dire`, `seulement`, `juste`, `plutôt`, `pas de`, and `sans`. A correction has priority over previous confirmed values, inferred values, and model guesses. When the user says `non je veux seulement une simple vitrine`, the merge policy invalidates conflicting requested features, records the correction, rejects `online_sales`, `ecommerce`, and `ai_solution`, applies `showcase_website`, and recomputes derived fields.
+
+Derived fields are no longer preserved when source facts change. `recompute_derived_state()` recalculates `service_family`, `project_type`, `complexity`, `completed_fields`, and `missing_relevant_fields` after every meaningful update. This is what prevents a stale e-commerce or AI classification from surviving an explicit correction.
+
+Completed fields are calculated from normalized values plus validation rules. `industry = "cosmetics"`, `project_type = "showcase_website"`, and `legal_structure = "SARL"` are completed independently. Completed values are skipped by the next-question selector unless the user supplies a correction.
+
+Qualification is contextual. A basic showcase website uses relevant fields such as industry, catalogue display, branding/content availability, number of pages, timeline, and budget. Legal structure is captured if the user volunteers it, but it is not a default required field for a simple cosmetics showcase website.
+
+Customer-facing fallback responses are generated from confirmed state only. For showcase websites, wording uses natural labels such as `site vitrine`, `site`, or `projet de site`; raw enum names, package labels, and generic AI/system wording are rejected by validation. The validator also rejects more than one question, premature pricing, AI mentions without AI state, legal-form questions when irrelevant or already completed, e-commerce mentions after rejection, and internal classification leaks.
+
+Regression coverage now includes the exact failing conversation through `/api/chatbot/chat/`. The final confirmed state is protected as:
+
+```python
+{
+    "language": "fr",
+    "industry": "cosmetics",
+    "project_type": "showcase_website",
+    "service_family": "website_development",
+    "requested_features": [],
+    "legal_structure": "SARL",
+}
+```
+
+## 2026-07-29 Pre-Qualification Fix
+
+A later regression showed that a bare greeting such as `Bonjour` entered qualification immediately. The root cause was that deterministic fallback generation treated an empty project state as missing qualification data. Because `industry` was the first missing relevant field, a new conversation could ask for sector, legal structure, budget, or timeline before the user had expressed any project.
+
+The remaining real-runtime bug was in `RAGChain.run()`: the function called `BusinessLogicEngine.analyze()` before the greeting and wait-for-project guard. That meant state recomputation and missing-field selection could be reached before the system had chosen the greeting handler. The fix moved the pre-qualification branch to the top of `RAGChain.run()`:
+
+```python
+load_conversation_state()
+intent = detect_prequalification_intent(user_message)
+
+if intent == "greeting" and not state.has_active_project:
+    return greeting_handler(state)
+
+if intent == "small_talk" and not state.has_active_project:
+    return small_talk_handler(state)
+
+if not state.has_active_project and not detect_project_intent(user_message):
+    return wait_for_project_handler(state)
+
+run_business_logic()
+run_qualification_selector_if_needed()
+run_retrieval()
+run_llm()
+run_validation()
+```
+
+For `bonjour`, the runtime now returns before query rewriting, business logic, qualification selection, retrieval, LLM generation, validation repair, or qualification fallback. The response source is `greeting_handler`, and the trace records `qualification_selector_called = False`.
+
+The state machine now has an explicit pre-qualification stage:
+
+```text
+START
+  |
+  v
+GREETING
+  |
+  v
+WAIT_FOR_PROJECT
+  |
+  | detect_project_intent(message) == True
+  v
+DISCOVERY
+  |
+  v
+QUALIFICATION
+  |
+  v
+RECOMMENDATION
+  |
+  v
+PRICING
+  |
+  v
+LEAD_CAPTURE
+  |
+  v
+HANDOFF
+```
+
+`GREETING` and `WAIT_FOR_PROJECT` cannot select qualification questions. The durable state includes `has_active_project`, `prequalification_intent`, and `just_activated_project`. Until `has_active_project` is true, `missing_relevant_fields` is empty and deterministic fallback uses the greeting/general-question handler.
+
+New conversation state is initialized as:
+
+```python
+{
+    "current_state": "WAIT_FOR_PROJECT",
+    "has_active_project": False,
+    "project_type": None,
+    "industry": None,
+    "completed_fields": [],
+    "asked_fields": [],
+}
+```
+
+`select_missing_relevant_fields()` now has a hard guard and raises `QualificationNotAllowed("Qualification cannot run before project intent.")` if called before `has_active_project` is true.
+
+Project intent is detected deterministically from a request phrase plus a project object. Examples that activate discovery include `Je veux un site web`, `Je cherche un ERP`, `Nous avons besoin d'un CRM`, `Je voudrais une application mobile`, `Nous souhaitons automatiser notre entreprise`, `Je veux un chatbot IA`, and `Nous cherchons une solution digitale`. Greetings, thanks, small talk, identity questions, service-list questions, and generic help questions remain in `WAIT_FOR_PROJECT`.
+
+The greeting handler returns the fixed welcome for a greeting-only turn and asks only what the user wants to realize today. It never asks for industry, legal structure, budget, timeline, company size, or project type before project intent exists. Once a project appears, discovery begins with the first relevant question, normally `Quel est votre secteur d'activité ?`.
+
+Validation now rejects premature qualification while no active project exists. If a generated response asks legal structure, budget, timeline, company size, or industry before project intent, the system falls back to the deterministic greeting/general response.
+
+Regression tests now cover:
+
+- `Bonjour` stays in `GREETING` with no qualification fields.
+- `Bonjour` then `Merci` stays in `WAIT_FOR_PROJECT`.
+- `Bonjour` then `Je veux un site web.` transitions to `DISCOVERY`.
+- `Bonjour` then `Quels services proposez-vous ?` answers services and stays in `WAIT_FOR_PROJECT`.
+- `Bonjour` then `Je veux un ERP.` starts discovery without pricing or recommendation.
+- A brand-new conversation gets fresh structured state and cannot inherit qualification progress.
+
+## 2026-07-29 Duplicate Industry Question Fix
+
+The conversation `Quel est votre secteur d'activité ?` -> `location de voiture` repeated the same industry question because the industry extractor did not recognize car-rental vocabulary. `_detect_industry()` only handled cosmetics, restaurant, and clinic. As a second failure, `calculate_completed_fields()` validated `industry` against the same narrow set, so even a future extracted value such as `car_rental` would not have been considered completed.
+
+The failure was therefore in extraction and completion, not in the prompt. The merge code could only apply fields that extraction returned; since `location de voiture` produced no `industry` update, recomputation left `industry = None`, `completed_fields` did not include `industry`, and `select_missing_relevant_fields()` correctly but undesirably selected `industry` again.
+
+Car-rental normalization is now explicit. These variants map to `industry = "car_rental"`:
+
+- `location de voiture`
+- `location automobile`
+- `agence de location`
+- `loueur automobile`
+- `location de véhicules`
+- `Auto Rental`
+- `car rental`
+
+`INDUSTRY_KEYWORDS` is the source of truth for both extraction and completion validation, so adding a canonical industry in one place keeps the pipeline consistent. A trace helper, `trace_message_processing()`, records incoming message, extracted entities, normalized values, state before merge, merge result, recomputed state, completed fields, missing fields, and selected next field for debugging one-turn state failures.
+
+The selector now asserts that the selected next field is not already completed. The response validator also rejects any outgoing question that asks a completed field or the last completed field unless that field has been explicitly invalidated by correction. This protects against future selector or wording regressions.
 
 ## Folder Structure
 

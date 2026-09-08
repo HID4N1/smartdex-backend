@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 class ConversationState(str, Enum):
     GREETING = "GREETING"
+    WAIT_FOR_PROJECT = "WAIT_FOR_PROJECT"
     DISCOVERY = "DISCOVERY"
     QUALIFICATION = "QUALIFICATION"
     SERVICE_SELECTION = "SERVICE_SELECTION"
@@ -25,10 +26,16 @@ class StatePolicy:
 
 STATE_POLICIES: Dict[ConversationState, StatePolicy] = {
     ConversationState.GREETING: StatePolicy(
-        objective="Open the conversation and identify the business context.",
-        allowed_actions=["acknowledge", "ask_business_type"],
-        forbidden_actions=["pricing", "quote", "package_recommendation"],
-        next_question="What type of business do you run?",
+        objective="Welcome the user without starting qualification.",
+        allowed_actions=["greet", "brief_identity", "wait_for_project"],
+        forbidden_actions=["qualification", "pricing", "quote", "package_recommendation"],
+        next_question="Que souhaitez-vous réaliser aujourd'hui ?",
+    ),
+    ConversationState.WAIT_FOR_PROJECT: StatePolicy(
+        objective="Handle greetings, small talk, and general questions until a project request exists.",
+        allowed_actions=["greet", "answer_general_question", "present_services_briefly", "wait_for_project"],
+        forbidden_actions=["qualification", "pricing", "quote", "package_recommendation"],
+        next_question="Que souhaitez-vous réaliser aujourd'hui ?",
     ),
     ConversationState.DISCOVERY: StatePolicy(
         objective="Understand the business, project goal, and problem to solve.",
@@ -110,6 +117,10 @@ class SalesStateMachine:
         history_text = self.normalize(
             " ".join(msg.get("content", "") for msg in history[-8:])
         )
+        has_active_project = bool(facts.get("has_active_project"))
+
+        if not has_active_project:
+            return ConversationState.WAIT_FOR_PROJECT
 
         if any(word in q for word in self.handoff_words) and facts.get("recommended_package"):
             return ConversationState.LEAD_CAPTURE
@@ -120,10 +131,10 @@ class SalesStateMachine:
         if any(word in q for word in self.pricing_words):
             if self._has_pricing_inputs(facts):
                 return ConversationState.PRICING
-            return ConversationState.QUALIFICATION
+            return ConversationState.DISCOVERY
 
         if not history:
-            return ConversationState.GREETING
+            return ConversationState.DISCOVERY
 
         if not facts.get("business_type") or not facts.get("project_goal"):
             return ConversationState.DISCOVERY

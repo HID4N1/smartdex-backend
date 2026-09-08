@@ -103,6 +103,7 @@ INSTALLED_APPS = [
 
     # Local apps
     'apps.chatbot',
+    'apps.contact',
     'apps.devis',
     'apps.health',
 ]

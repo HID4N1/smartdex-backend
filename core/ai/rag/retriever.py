@@ -16,7 +16,7 @@ class Retriever:
         self,
         collection_name: str = "smartdex_kb"
     ):
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "missing-openai-api-key")
 
         self.client = chromadb.PersistentClient(
             path=settings.CHROMA_DIR
