@@ -1,13 +1,16 @@
 from pathlib import Path
 import tempfile
 import logging
+import uuid
 
 from django.http import FileResponse
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.throttling import ScopedRateThrottle
 
 from apps.devis.models import DevisRequest
 from apps.devis.serializers import (
@@ -18,6 +21,27 @@ from apps.devis.serializers import (
 from apps.devis.services.devis_services import DevisService
 
 logger = logging.getLogger(__name__)
+
+
+def _is_staff_request(request) -> bool:
+    user = getattr(request, "user", None)
+    return bool(user and user.is_authenticated and user.is_staff)
+
+
+def _get_devis_request_for_generation(request, pk: int) -> DevisRequest:
+    if _is_staff_request(request):
+        return get_object_or_404(DevisRequest, pk=pk)
+
+    token = request.query_params.get("token")
+    if not token:
+        raise Http404
+
+    try:
+        access_token = uuid.UUID(token)
+    except (TypeError, ValueError):
+        raise Http404
+
+    return get_object_or_404(DevisRequest, pk=pk, access_token=access_token)
 
 
 def _build_description_from_messages(messages: list[dict]) -> str:
@@ -37,6 +61,9 @@ def _build_description_from_messages(messages: list[dict]) -> str:
 
 
 class DevisRequestCreateView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "devis_create"
+
     def post(self, request, *args, **kwargs):
         serializer = DevisRequestCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -46,6 +73,7 @@ class DevisRequestCreateView(APIView):
         return Response(
             {
                 "id": devis_request.id,
+                "access_token": str(devis_request.access_token),
                 "status": devis_request.status,
                 "message": "Devis request created successfully.",
             },
@@ -54,8 +82,11 @@ class DevisRequestCreateView(APIView):
 
 
 class DevisRequestGenerateQuoteView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "devis_generate"
+
     def post(self, request, pk: int, *args, **kwargs):
-        devis_request = get_object_or_404(DevisRequest, pk=pk)
+        devis_request = _get_devis_request_for_generation(request, pk)
         service = DevisService()
 
         result = service.generate_quote_from_request(devis_request)
@@ -72,6 +103,10 @@ class DevisRequestGenerateQuoteView(APIView):
                 )
 
         if result.get("status") == "processed":
+            result = {
+                **result,
+                "access_token": str(devis_request.access_token),
+            }
             response_serializer = GeneratedQuoteResponseSerializer(result)
             return Response(response_serializer.data, status=status.HTTP_200_OK)
 
@@ -80,6 +115,9 @@ class DevisRequestGenerateQuoteView(APIView):
 
 
 class GenerateDevisFromChatView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "devis_generate"
+
     def post(self, request, *args, **kwargs):
         serializer = GenerateDevisFromChatSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -126,6 +164,7 @@ class GenerateDevisFromChatView(APIView):
             return Response(
                 {
                     "request_id": result.get("request_id"),
+                    "access_token": str(devis_request.access_token),
                     "status": "processed",
                     "estimate": result.get("estimate"),
                     "quote": result.get("quote"),
@@ -140,6 +179,7 @@ class GenerateDevisFromChatView(APIView):
             return Response(
                 {
                     "request_id": result.get("request_id"),
+                    "access_token": str(devis_request.access_token),
                     "status": "needs_clarification",
                     "estimate": None,
                     "quote": None,

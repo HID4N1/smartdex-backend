@@ -76,7 +76,10 @@ class DevisOrchestrator:
                 generated_path = DevisPDFGenerator().generate(pdf_context, pdf_path)
                 state.pdf.generated = True
                 state.pdf.path = str(generated_path)
-                state.pdf.url = f"{reverse('devis-generate', kwargs={'pk': devis_request.id})}?format=pdf"
+                state.pdf.url = (
+                    f"{reverse('devis-generate', kwargs={'pk': devis_request.id})}"
+                    f"?format=pdf&token={devis_request.access_token}"
+                )
             except Exception as exc:
                 logger.exception(
                     "PDF generation failed for request_id=%s: %s",
@@ -91,6 +94,7 @@ class DevisOrchestrator:
 
             return state, {
                 "request_id": devis_request.id,
+                "access_token": devis_request.access_token,
                 "status": "processed",
                 "estimate": formatted_payload.get("estimate", {}),
                 "quote": formatted_payload.get("quote", {}),
@@ -108,6 +112,7 @@ class DevisOrchestrator:
             state.metadata.status = "failed"
             return state, {
                 "request_id": devis_request.id,
+                "access_token": devis_request.access_token,
                 "status": "failed",
                 "detail": "Could not generate devis. Please try again.",
                 "estimate": {},
@@ -120,6 +125,7 @@ class DevisOrchestrator:
     def _build_clarification_payload(self, devis_request, state: AgentState) -> dict:
         return {
             "request_id": devis_request.id,
+            "access_token": devis_request.access_token,
             "status": "needs_clarification",
             "estimate": {},
             "quote": {

@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.test import TestCase
 from rest_framework.test import APIClient
 
@@ -6,6 +7,7 @@ from apps.contact.models import ContactMessage
 
 class ContactMessageAPITests(TestCase):
     def setUp(self):
+        cache.clear()
         self.client = APIClient()
         self.url = "/api/contact/"
         self.payload = {

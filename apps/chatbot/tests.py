@@ -1,3 +1,4 @@
+from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
@@ -160,6 +161,9 @@ class ChatbotResponseValidatorTests(SimpleTestCase):
 
 
 class ChatbotAPIRegressionTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
     def test_greeting_stays_in_wait_for_project_without_qualification(self):
         client = APIClient()
         response = client.post("/api/chatbot/chat/", {"message": "bonjour"}, format="json")

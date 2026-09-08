@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.throttling import ScopedRateThrottle
 
 from apps.chatbot.models import Conversation, ChatMessage
 from apps.chatbot.serializers import ChatRequestSerializer, ConversationSerializer
@@ -9,6 +10,9 @@ from core.ai.rag.chain import RAGChain
 
 
 class ChatbotAPIView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "chatbot"
+
     def post(self, request):
         serializer = ChatRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -5,7 +5,24 @@ from apps.devis.models import DevisRequest
 class DevisRequestCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = DevisRequest
-        fields = "__all__"
+        fields = [
+            "id",
+            "description",
+            "client_name",
+            "client_email",
+            "client_phone",
+            "budget_range",
+            "timeline",
+            "project_type",
+            "preferred_language",
+            "features",
+            "extra_hints",
+            "access_token",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "access_token", "status", "created_at", "updated_at"]
 
 
 class QuoteItemSerializer(serializers.Serializer):
@@ -80,6 +97,7 @@ class GenerateDevisFromChatSerializer(serializers.Serializer):
 
 class GeneratedQuoteResponseSerializer(serializers.Serializer):
     request_id = serializers.IntegerField()
+    access_token = serializers.UUIDField(required=False)
     status = serializers.CharField()
     estimate = EstimateSerializer()
     quote = QuoteSerializer()

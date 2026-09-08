@@ -31,6 +31,16 @@ def env_bool(name, default=False):
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name, default=0):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except ValueError:
+        return default
+
+
 def env_list(name, default=None):
     value = os.getenv(name)
     if not value:
@@ -109,6 +119,14 @@ INSTALLED_APPS = [
 ]
 
 REST_FRAMEWORK = {
+    "URL_FORMAT_OVERRIDE": None,
+    "DEFAULT_THROTTLE_RATES": {
+        "contact": os.getenv("THROTTLE_RATE_CONTACT", "5/hour"),
+        "devis_create": os.getenv("THROTTLE_RATE_DEVIS_CREATE", "10/hour"),
+        "devis_generate": os.getenv("THROTTLE_RATE_DEVIS_GENERATE", "10/hour"),
+        "chatbot": os.getenv("THROTTLE_RATE_CHATBOT", "30/hour"),
+    },
+    "NUM_PROXIES": env_int("DRF_NUM_PROXIES", 1),
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
