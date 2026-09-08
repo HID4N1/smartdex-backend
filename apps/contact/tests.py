@@ -3,6 +3,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.contact.models import ContactMessage
+from core.utils.public_input_validation import CONTACT_MESSAGE_MAX_LENGTH
 
 
 class ContactMessageAPITests(TestCase):
@@ -55,6 +56,43 @@ class ContactMessageAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("email", response.json())
+
+    def test_whitespace_message_returns_400(self):
+        payload = {**self.payload, "message": "    \n\t   "}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("message", response.json())
+        self.assertEqual(ContactMessage.objects.count(), 0)
+
+    def test_overlong_name_returns_400(self):
+        payload = {**self.payload, "name": "F" * 101}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("name", response.json())
+
+    def test_overlong_message_returns_400(self):
+        payload = {**self.payload, "message": "x" * (CONTACT_MESSAGE_MAX_LENGTH + 1)}
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("message", response.json())
+
+    def test_multilingual_contact_content_is_accepted(self):
+        payload = {
+            **self.payload,
+            "name": "ليلى Benali",
+            "subject": "Projet multilingue",
+            "message": "Bonjour, نحتاج منصة للزبناء avec paiement et notifications.",
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.content)
 
     def test_public_submission_works_without_authentication(self):
         self.client.credentials()

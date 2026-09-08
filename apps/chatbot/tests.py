@@ -1,12 +1,20 @@
+from unittest.mock import patch
+
 from django.core.cache import cache
 from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
+from apps.chatbot.models import ChatMessage, Conversation
 from apps.chatbot.services.business_logic import BusinessLogicEngine, QualificationNotAllowed
 from apps.chatbot.services.prompting import PromptBuilder
 from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
 from apps.chatbot.services.validation import ResponseValidator
 from core.ai.rag.chain import RAGChain
+from core.utils.public_input_validation import (
+    CHAT_HISTORY_MAX_CHARACTERS,
+    CHAT_HISTORY_MAX_MESSAGES,
+    CHAT_MESSAGE_MAX_LENGTH,
+)
 
 
 class ChatbotBusinessLogicTests(SimpleTestCase):
@@ -239,6 +247,91 @@ class ChatbotAIPromptPrivacyTests(SimpleTestCase):
 class ChatbotAPIRegressionTests(TestCase):
     def setUp(self):
         cache.clear()
+
+    @patch("apps.chatbot.views.RAGChain")
+    def test_normal_message_succeeds(self, rag_chain_class):
+        rag_chain_class.return_value.run.return_value = {
+            "query": "bonjour",
+            "rewritten_query": None,
+            "intent": "greeting",
+            "state": ConversationState.WAIT_FOR_PROJECT,
+            "answer": "Bonjour.",
+            "sources": [],
+            "structured_state": {"current_state": ConversationState.WAIT_FOR_PROJECT},
+            "runtime_trace": {},
+        }
+
+        response = APIClient().post("/api/chatbot/chat/", {"message": "bonjour"}, format="json")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        rag_chain_class.return_value.run.assert_called_once()
+
+    @patch("apps.chatbot.views.RAGChain")
+    def test_blank_message_is_rejected_before_rag(self, rag_chain_class):
+        response = APIClient().post("/api/chatbot/chat/", {"message": "   \n\t  "}, format="json")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("message", response.json())
+        self.assertEqual(Conversation.objects.count(), 0)
+        rag_chain_class.return_value.run.assert_not_called()
+
+    @patch("apps.chatbot.views.RAGChain")
+    def test_overlong_message_is_rejected_before_rag(self, rag_chain_class):
+        response = APIClient().post(
+            "/api/chatbot/chat/",
+            {"message": "x" * (CHAT_MESSAGE_MAX_LENGTH + 1)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("message", response.json())
+        self.assertEqual(Conversation.objects.count(), 0)
+        rag_chain_class.return_value.run.assert_not_called()
+
+    @patch("apps.chatbot.views.RAGChain")
+    def test_excessive_history_length_is_rejected_before_rag(self, rag_chain_class):
+        conversation = Conversation.objects.create(
+            title="Long conversation",
+            structured_state=BusinessLogicEngine().initial_state(),
+        )
+        ChatMessage.objects.bulk_create(
+            ChatMessage(conversation=conversation, role="user", content=f"message {index}")
+            for index in range(CHAT_HISTORY_MAX_MESSAGES)
+        )
+
+        response = APIClient().post(
+            "/api/chatbot/chat/",
+            {"message": "bonjour", "conversation_id": str(conversation.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("history", response.json())
+        self.assertEqual(conversation.messages.count(), CHAT_HISTORY_MAX_MESSAGES)
+        rag_chain_class.return_value.run.assert_not_called()
+
+    @patch("apps.chatbot.views.RAGChain")
+    def test_excessive_history_characters_are_rejected_before_rag(self, rag_chain_class):
+        conversation = Conversation.objects.create(
+            title="Large conversation",
+            structured_state=BusinessLogicEngine().initial_state(),
+        )
+        ChatMessage.objects.create(
+            conversation=conversation,
+            role="user",
+            content="x" * (CHAT_HISTORY_MAX_CHARACTERS - 5),
+        )
+
+        response = APIClient().post(
+            "/api/chatbot/chat/",
+            {"message": "bonjour", "conversation_id": str(conversation.id)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("history", response.json())
+        self.assertEqual(conversation.messages.count(), 1)
+        rag_chain_class.return_value.run.assert_not_called()
 
     def test_public_chat_response_exposes_only_expected_fields(self):
         client = APIClient()

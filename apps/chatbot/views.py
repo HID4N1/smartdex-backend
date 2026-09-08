@@ -8,6 +8,11 @@ from apps.chatbot.models import Conversation, ChatMessage
 from apps.chatbot.serializers import ChatRequestSerializer, ConversationSerializer
 from apps.chatbot.services.business_logic import BusinessLogicEngine
 from core.ai.rag.chain import RAGChain
+from core.utils.public_input_validation import (
+    CHAT_HISTORY_MAX_CHARACTERS,
+    CHAT_HISTORY_MAX_MESSAGES,
+    aggregate_message_characters,
+)
 
 
 class ChatbotAPIView(APIView):
@@ -37,15 +42,27 @@ class ChatbotAPIView(APIView):
             )
             is_new_conversation = True
 
+        existing_history = list(
+            conversation.messages.order_by("created_at").values("role", "content")
+        )
+        if len(existing_history) >= CHAT_HISTORY_MAX_MESSAGES:
+            return Response(
+                {"history": [f"Conversation history is limited to {CHAT_HISTORY_MAX_MESSAGES} messages."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if aggregate_message_characters(existing_history, include=message) > CHAT_HISTORY_MAX_CHARACTERS:
+            return Response(
+                {"history": [f"Conversation history is limited to {CHAT_HISTORY_MAX_CHARACTERS} characters."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         ChatMessage.objects.create(
             conversation=conversation,
             role="user",
             content=message,
         )
 
-        history = list(
-            conversation.messages.order_by("created_at").values("role", "content")
-        )
+        history = [*existing_history, {"role": "user", "content": message}]
 
         rag = RAGChain()
         result = rag.run(

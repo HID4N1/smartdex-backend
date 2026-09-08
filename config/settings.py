@@ -14,6 +14,7 @@ from pathlib import Path
 from dotenv import dotenv_values, load_dotenv
 import os
 import dj_database_url
+from core.utils.public_input_validation import PUBLIC_JSON_BODY_LIMIT_BYTES
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -98,6 +99,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://*.onrender.com",
 ]
 
+DATA_UPLOAD_MAX_MEMORY_SIZE = PUBLIC_JSON_BODY_LIMIT_BYTES
+FILE_UPLOAD_MAX_MEMORY_SIZE = 1 * 1024 * 1024
+
 
 # Application definition
 
@@ -136,9 +140,11 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
     ],
+    "EXCEPTION_HANDLER": "core.utils.exception_handlers.public_exception_handler",
 }
 
 MIDDLEWARE = [
+    "core.middleware.RequestBodySizeLimitMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     "whitenoise.middleware.WhiteNoiseMiddleware",

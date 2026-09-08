@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from apps.chatbot.models import Conversation, ChatMessage
+from core.utils.public_input_validation import CHAT_MESSAGE_MAX_LENGTH, validate_long_text
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
@@ -17,5 +18,11 @@ class ConversationSerializer(serializers.ModelSerializer):
 
 
 class ChatRequestSerializer(serializers.Serializer):
-    message = serializers.CharField()
+    message = serializers.CharField(
+        max_length=CHAT_MESSAGE_MAX_LENGTH,
+        trim_whitespace=True,
+    )
     conversation_id = serializers.UUIDField(required=False)
+
+    def validate_message(self, value):
+        return validate_long_text(value, max_length=CHAT_MESSAGE_MAX_LENGTH)

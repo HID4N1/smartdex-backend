@@ -1,8 +1,25 @@
 from rest_framework import serializers
 from apps.devis.models import DevisRequest
+from core.utils.public_input_validation import (
+    CHAT_HISTORY_MAX_CHARACTERS,
+    CHAT_MESSAGE_MAX_LENGTH,
+    DEVIS_CHAT_MESSAGES_MAX_ITEMS,
+    DEVIS_DESCRIPTION_MAX_LENGTH,
+    SHORT_TEXT_LIMITS,
+    aggregate_message_characters,
+    validate_budget_text,
+    validate_extra_hints,
+    validate_features,
+    validate_long_text,
+    validate_phone,
+    validate_short_text,
+)
 
 
 class DevisRequestCreateSerializer(serializers.ModelSerializer):
+    features = serializers.JSONField(required=False)
+    extra_hints = serializers.JSONField(required=False)
+
     class Meta:
         model = DevisRequest
         fields = [
@@ -23,6 +40,93 @@ class DevisRequestCreateSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "access_token", "status", "created_at", "updated_at"]
+        extra_kwargs = {
+            "description": {"max_length": DEVIS_DESCRIPTION_MAX_LENGTH, "trim_whitespace": True},
+            "client_name": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_client_name"],
+                "trim_whitespace": True,
+            },
+            "client_email": {"required": False, "allow_blank": True, "max_length": 254, "trim_whitespace": True},
+            "client_phone": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_client_phone"],
+                "trim_whitespace": True,
+            },
+            "budget_range": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_budget_range"],
+                "trim_whitespace": True,
+            },
+            "timeline": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_timeline"],
+                "trim_whitespace": True,
+            },
+            "project_type": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_project_type"],
+                "trim_whitespace": True,
+            },
+            "preferred_language": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": SHORT_TEXT_LIMITS["devis_preferred_language"],
+                "trim_whitespace": True,
+            },
+        }
+
+    def validate_description(self, value):
+        return validate_long_text(value, max_length=DEVIS_DESCRIPTION_MAX_LENGTH)
+
+    def validate_client_name(self, value):
+        return validate_short_text(
+            value,
+            field_name="Client name",
+            max_length=SHORT_TEXT_LIMITS["devis_client_name"],
+            allow_blank=True,
+        )
+
+    def validate_client_phone(self, value):
+        return validate_phone(value)
+
+    def validate_budget_range(self, value):
+        return validate_budget_text(value)
+
+    def validate_timeline(self, value):
+        return validate_short_text(
+            value,
+            field_name="Timeline",
+            max_length=SHORT_TEXT_LIMITS["devis_timeline"],
+            allow_blank=True,
+        )
+
+    def validate_project_type(self, value):
+        return validate_short_text(
+            value,
+            field_name="Project type",
+            max_length=SHORT_TEXT_LIMITS["devis_project_type"],
+            allow_blank=True,
+        )
+
+    def validate_preferred_language(self, value):
+        return validate_short_text(
+            value,
+            field_name="Preferred language",
+            max_length=SHORT_TEXT_LIMITS["devis_preferred_language"],
+            allow_blank=True,
+        )
+
+    def validate_features(self, value):
+        return validate_features(value)
+
+    def validate_extra_hints(self, value):
+        return validate_extra_hints(value)
 
 
 class QuoteItemSerializer(serializers.Serializer):
@@ -73,25 +177,88 @@ class QuoteSerializer(serializers.Serializer):
 
 
 class ChatContextMessageSerializer(serializers.Serializer):
-    role = serializers.CharField()
-    content = serializers.CharField()
+    role = serializers.ChoiceField(choices=["user", "assistant"])
+    content = serializers.CharField(
+        max_length=CHAT_MESSAGE_MAX_LENGTH,
+        trim_whitespace=True,
+    )
+
+    def validate_content(self, value):
+        return validate_long_text(value, max_length=CHAT_MESSAGE_MAX_LENGTH)
 
 
 class GenerateDevisFromChatSerializer(serializers.Serializer):
-    messages = ChatContextMessageSerializer(many=True, required=False)
-    description = serializers.CharField(required=False, allow_blank=True)
-    client_name = serializers.CharField(required=False, allow_blank=True)
+    messages = ChatContextMessageSerializer(
+        many=True,
+        required=False,
+        max_length=DEVIS_CHAT_MESSAGES_MAX_ITEMS,
+    )
+    description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=DEVIS_DESCRIPTION_MAX_LENGTH,
+        trim_whitespace=True,
+    )
+    client_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=SHORT_TEXT_LIMITS["devis_client_name"],
+        trim_whitespace=True,
+    )
     client_email = serializers.EmailField(required=False, allow_blank=True)
-    client_phone = serializers.CharField(required=False, allow_blank=True)
-    preferred_language = serializers.CharField(required=False, allow_blank=True)
+    client_phone = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=SHORT_TEXT_LIMITS["devis_client_phone"],
+        trim_whitespace=True,
+    )
+    preferred_language = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=SHORT_TEXT_LIMITS["devis_preferred_language"],
+        trim_whitespace=True,
+    )
+
+    def validate_description(self, value):
+        if not value:
+            return ""
+        return validate_long_text(value, max_length=DEVIS_DESCRIPTION_MAX_LENGTH)
+
+    def validate_client_name(self, value):
+        return validate_short_text(
+            value,
+            field_name="Client name",
+            max_length=SHORT_TEXT_LIMITS["devis_client_name"],
+            allow_blank=True,
+        )
+
+    def validate_client_phone(self, value):
+        return validate_phone(value)
+
+    def validate_preferred_language(self, value):
+        return validate_short_text(
+            value,
+            field_name="Preferred language",
+            max_length=SHORT_TEXT_LIMITS["devis_preferred_language"],
+            allow_blank=True,
+        )
 
     def validate(self, attrs):
         messages = attrs.get("messages") or []
         description = (attrs.get("description") or "").strip()
+        if aggregate_message_characters(messages, include=description) > CHAT_HISTORY_MAX_CHARACTERS:
+            raise serializers.ValidationError(
+                f"Chat context must contain no more than {CHAT_HISTORY_MAX_CHARACTERS} characters."
+            )
         if not messages and not description:
             raise serializers.ValidationError(
                 "At least one of messages or description is required."
             )
+        if messages and not description and not any(
+            message["role"] == "user" and message["content"].strip()
+            for message in messages
+        ):
+            raise serializers.ValidationError("At least one user message with content is required.")
         return attrs
 
 

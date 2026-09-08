@@ -17,6 +17,11 @@ from apps.devis.services.ai_input_builder import DevisAIInputBuilder
 from apps.devis.services.devis_services import DevisService
 from apps.devis.services.pdf_context_builder import PDFContextBuilder
 from apps.devis.services.llm_service import LLMService
+from core.utils.public_input_validation import (
+    DEVIS_CHAT_MESSAGES_MAX_ITEMS,
+    DEVIS_DESCRIPTION_MAX_LENGTH,
+    DEVIS_FEATURES_MAX_ITEMS,
+)
 
 
 TEST_THROTTLE_SETTINGS = {
@@ -107,6 +112,77 @@ class DevisRequestSecurityTests(TestCase):
 
         devis_request = DevisRequest.objects.get(pk=data["id"])
         self.assertEqual(data["access_token"], str(devis_request.access_token))
+
+    def test_valid_devis_request_succeeds(self):
+        response = self.client.post(self.create_url, self.payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.content)
+        devis_request = DevisRequest.objects.get(pk=response.json()["id"])
+        self.assertEqual(devis_request.description, self.payload["description"])
+        self.assertEqual(devis_request.features, self.payload["features"])
+        self.assertEqual(devis_request.extra_hints, self.payload["extra_hints"])
+
+    def test_devis_create_rejects_blank_description(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "description": "  \n\t  "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("description", response.json())
+        self.assertEqual(DevisRequest.objects.count(), 0)
+
+    def test_devis_create_rejects_excessively_long_description(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "description": "x" * (DEVIS_DESCRIPTION_MAX_LENGTH + 1)},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("description", response.json())
+        self.assertEqual(DevisRequest.objects.count(), 0)
+
+    def test_devis_create_rejects_malformed_email(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "client_email": "not-an-email"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("client_email", response.json())
+
+    def test_devis_create_rejects_excessive_feature_count(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "features": [f"feature-{index}" for index in range(DEVIS_FEATURES_MAX_ITEMS + 1)]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("features", response.json())
+
+    def test_devis_create_rejects_nested_extra_hints(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "extra_hints": {"metadata": {"deep": "value"}}},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("extra_hints", response.json())
+
+    def test_devis_create_rejects_negative_budget(self):
+        response = self.client.post(
+            self.create_url,
+            {**self.payload, "budget_range": "-1000 MAD"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("budget_range", response.json())
 
     def test_access_token_is_unique(self):
         first = self.create_devis_request(client_email="first@example.com")
@@ -267,6 +343,36 @@ class DevisRequestSecurityTests(TestCase):
         service_class.return_value.generate_quote_from_request.assert_not_called()
 
     @patch("apps.devis.views.DevisService")
+    def test_generate_from_chat_rejects_excessive_messages_before_service(self, service_class):
+        response = self.client.post(
+            "/api/devis/generate-from-chat/",
+            {
+                "messages": [
+                    {"role": "user", "content": f"Need feature {index}"}
+                    for index in range(DEVIS_CHAT_MESSAGES_MAX_ITEMS + 1)
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("messages", response.json())
+        service_class.return_value.create_request_from_description.assert_not_called()
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
+    def test_generate_from_chat_rejects_blank_context_before_service(self, service_class):
+        response = self.client.post(
+            "/api/devis/generate-from-chat/",
+            {"description": " ", "messages": [{"role": "assistant", "content": "Bonjour"}]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        service_class.return_value.create_request_from_description.assert_not_called()
+        service_class.return_value.generate_quote_from_request.assert_not_called()
+
+    @patch("apps.devis.views.DevisService")
     def test_staff_can_generate_without_token(self, service_class):
         devis_request = self.create_devis_request()
         service_class.return_value.generate_quote_from_request.return_value = processed_quote_result(devis_request)
@@ -316,6 +422,26 @@ class PublicEndpointAuthorizationPostureTests(TestCase):
         self.assertEqual(get_response.status_code, 200, get_response.content)
         self.assertEqual(get_response.json(), {"status": "ok"})
         self.assertEqual(post_response.status_code, 405, post_response.content)
+
+
+class RequestSizeHardeningTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+        self.client.raise_request_exception = False
+
+    @override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=512)
+    @patch("apps.chatbot.views.RAGChain")
+    def test_oversized_json_body_is_rejected_before_chatbot_rag(self, rag_chain_class):
+        response = self.client.post(
+            "/api/chatbot/chat/",
+            {"message": "x" * 600},
+            format="json",
+        )
+
+        self.assertIn(response.status_code, {400, 413}, response.content)
+        self.assertEqual(Conversation.objects.count(), 0)
+        rag_chain_class.return_value.run.assert_not_called()
 
 
 class DevisAIPrivacyTests(TestCase):
