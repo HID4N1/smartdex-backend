@@ -18,6 +18,7 @@ class DevisAIInputBuilder:
             getattr(devis_request, "access_token", None),
         ]
 
+        # OpenAI receives this AI-safe project context, not full client metadata.
         return {
             "description": redact_pii_text(
                 getattr(devis_request, "description", "") or "",

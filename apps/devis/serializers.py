@@ -34,6 +34,7 @@ class DevisRequestCreateSerializer(serializers.ModelSerializer):
             "preferred_language",
             "features",
             "extra_hints",
+            "marketing_consent",
             "access_token",
             "status",
             "created_at",
@@ -79,6 +80,7 @@ class DevisRequestCreateSerializer(serializers.ModelSerializer):
                 "max_length": SHORT_TEXT_LIMITS["devis_preferred_language"],
                 "trim_whitespace": True,
             },
+            "marketing_consent": {"required": False},
         }
 
     def validate_description(self, value):

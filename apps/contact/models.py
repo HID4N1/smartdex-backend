@@ -1,4 +1,10 @@
 from django.db import models
+from django.conf import settings
+from django.utils import timezone
+
+
+def current_privacy_notice_version():
+    return settings.SMARTDEX_PRIVACY_NOTICE_VERSION
 
 
 class ContactMessage(models.Model):
@@ -30,6 +36,19 @@ class ContactMessage(models.Model):
     budget = models.CharField(max_length=50, choices=BUDGET_CHOICES, blank=True)
     subject = models.CharField(max_length=200)
     message = models.TextField(max_length=2000)
+    processing_purpose = models.CharField(
+        max_length=50,
+        default="contact_inquiry",
+        editable=False,
+    )
+    privacy_notice_version = models.CharField(
+        max_length=50,
+        default=current_privacy_notice_version,
+    )
+    privacy_notice_acknowledged_at = models.DateTimeField(default=timezone.now)
+    marketing_consent = models.BooleanField(default=False)
+    marketing_consent_version = models.CharField(max_length=50, blank=True)
+    marketing_consented_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     is_read = models.BooleanField(default=False)
 
@@ -38,3 +57,14 @@ class ContactMessage(models.Model):
 
     def __str__(self):
         return f"ContactMessage<{self.name} - {self.subject}>"
+
+    def save(self, *args, **kwargs):
+        if self.marketing_consent:
+            if not self.marketing_consented_at:
+                self.marketing_consented_at = timezone.now()
+            if not self.marketing_consent_version:
+                self.marketing_consent_version = self.privacy_notice_version
+        else:
+            self.marketing_consented_at = None
+            self.marketing_consent_version = ""
+        super().save(*args, **kwargs)

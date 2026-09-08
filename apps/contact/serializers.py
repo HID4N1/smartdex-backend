@@ -20,6 +20,7 @@ class ContactMessageCreateSerializer(serializers.ModelSerializer):
             "budget",
             "subject",
             "message",
+            "marketing_consent",
         )
         extra_kwargs = {
             "name": {"max_length": SHORT_TEXT_LIMITS["contact_name"], "trim_whitespace": True},
@@ -38,6 +39,7 @@ class ContactMessageCreateSerializer(serializers.ModelSerializer):
                 "trim_whitespace": True,
                 "style": {"base_template": "textarea.html"},
             },
+            "marketing_consent": {"required": False},
         }
 
     def validate_name(self, value):

@@ -29,6 +29,7 @@ class DevisService:
             client_email=client_email,
             client_phone=client_phone,
             preferred_language=preferred_language,
+            submission_source="chatbot_generated",
         )
 
     def generate_quote_from_request(self, devis_request: DevisRequest) -> dict:

@@ -80,6 +80,7 @@ class PromptBuilder:
         history: List[Dict],
         user_message: str,
     ) -> str:
+        # OpenAI receives redacted message/history context; raw stored chat text stays local.
         safe_decision = redact_for_ai(decision)
         safe_user_message = redact_pii_text(user_message)
         return f"""CONVERSATION STATE
