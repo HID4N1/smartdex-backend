@@ -1,5 +1,7 @@
 from typing import Dict, List, Optional
 
+from core.utils.privacy import redact_for_ai, redact_pii_text
+
 
 SYSTEM_PROMPT = """You are SmartDex's AI Sales Consultant.
 
@@ -78,6 +80,8 @@ class PromptBuilder:
         history: List[Dict],
         user_message: str,
     ) -> str:
+        safe_decision = redact_for_ai(decision)
+        safe_user_message = redact_pii_text(user_message)
         return f"""CONVERSATION STATE
 {state}
 
@@ -88,7 +92,7 @@ Forbidden actions: {state_policy.get("forbidden_actions")}
 Required next question if more information is needed: {state_policy.get("next_question")}
 
 BUSINESS LOGIC OUTPUT
-{decision}
+{safe_decision}
 
 RETRIEVED KNOWLEDGE
 {knowledge or "No retrieved knowledge available."}
@@ -97,7 +101,7 @@ CONVERSATION HISTORY
 {self._format_history(history)}
 
 CURRENT USER MESSAGE
-{user_message}
+{safe_user_message}
 
 Write the final client-facing response. The application has already made deterministic decisions; explain them without changing them."""
 
@@ -108,7 +112,7 @@ Write the final client-facing response. The application has already made determi
         lines = []
         for msg in history[-6:]:
             role = msg.get("role", "user").capitalize()
-            content = (msg.get("content") or "").strip()
+            content = redact_pii_text((msg.get("content") or "").strip())
             if content:
                 lines.append(f"{role}: {content}")
         return "\n".join(lines) if lines else "No previous conversation."

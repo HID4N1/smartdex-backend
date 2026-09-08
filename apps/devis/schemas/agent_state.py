@@ -15,6 +15,7 @@ class ClientInfo(BaseModel):
 class InputState(BaseModel):
     user_message: str = ""
     client_info: ClientInfo = Field(default_factory=ClientInfo)
+    ai_project_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class RequirementState(BaseModel):

@@ -12,6 +12,7 @@ from apps.devis.agents.requirement_agent import RequirementAgent
 from apps.devis.agents.validation_agent import ValidationAgent
 from apps.devis.presentation.formatter import format_generated_quote
 from apps.devis.schemas.agent_state import AgentState, ClientInfo, InputState
+from apps.devis.services.ai_input_builder import DevisAIInputBuilder
 from apps.devis.services.pdf_context_builder import PDFContextBuilder
 from apps.devis.services.pdf_generator import DevisPDFGenerator
 from core.pricing.service import DevisService as CorePricingService
@@ -28,9 +29,11 @@ class DevisOrchestrator:
         self.pricing_service = CorePricingService()
 
     def run(self, devis_request) -> tuple[AgentState, dict]:
+        ai_project_context = DevisAIInputBuilder.build_project_context(devis_request)
         state = AgentState(
             input=InputState(
-                user_message=devis_request.description or "",
+                user_message=ai_project_context.get("description") or "",
+                ai_project_context=ai_project_context,
                 client_info=ClientInfo(
                     name=devis_request.client_name or None,
                     email=devis_request.client_email or None,

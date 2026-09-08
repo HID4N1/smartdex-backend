@@ -12,6 +12,10 @@ from rest_framework.throttling import SimpleRateThrottle
 from apps.chatbot.models import ChatMessage, Conversation
 from apps.contact.models import ContactMessage
 from apps.devis.models import DevisRequest
+from apps.devis.services.ai_input_builder import DevisAIInputBuilder
+from apps.devis.services.devis_services import DevisService
+from apps.devis.services.pdf_context_builder import PDFContextBuilder
+from apps.devis.services.llm_service import LLMService
 
 
 TEST_THROTTLE_SETTINGS = {
@@ -220,6 +224,181 @@ class DevisRequestSecurityTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         service_class.return_value.generate_quote_from_request.assert_called_once_with(devis_request)
+
+
+class DevisAIPrivacyTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.client = APIClient()
+
+    def create_private_devis_request(self):
+        return DevisRequest.objects.create(
+            description=(
+                "Fatima Zahra needs a booking website for a clinic with online payments, "
+                "WhatsApp reminders, budget 15000 MAD, and delivery within 1 month. "
+                "Contact fatima@example.com or +212600000000. "
+                "Address: 12 Rue Client, Casablanca. "
+                "PDF link /api/devis/requests/7/generate/?format=pdf&token=123e4567-e89b-12d3-a456-426614174000"
+            ),
+            client_name="Fatima Zahra",
+            client_email="fatima@example.com",
+            client_phone="+212600000000",
+            budget_range="15000 MAD",
+            timeline="1 month",
+            project_type="booking_system",
+            preferred_language="fr",
+            features=["payments", "notifications"],
+            extra_hints={
+                "industry": "clinic",
+                "client_address": "12 Rue Client, Casablanca",
+                "access_token": "secret-token",
+            },
+        )
+
+    def assert_no_private_values(self, payload: str, devis_request: DevisRequest):
+        self.assertNotIn(devis_request.client_name, payload)
+        self.assertNotIn(devis_request.client_email, payload)
+        self.assertNotIn(devis_request.client_phone, payload)
+        self.assertNotIn(str(devis_request.access_token), payload)
+        self.assertNotIn("123e4567-e89b-12d3-a456-426614174000", payload)
+        self.assertNotIn("secret-token", payload)
+        self.assertNotIn("12 Rue Client", payload)
+
+    def test_ai_project_context_whitelists_quote_inputs_and_redacts_private_metadata(self):
+        devis_request = self.create_private_devis_request()
+
+        context = DevisAIInputBuilder.build_project_context(devis_request)
+        serialized = str(context)
+
+        self.assert_no_private_values(serialized, devis_request)
+        self.assertIn("booking website", serialized)
+        self.assertIn("payments", serialized)
+        self.assertIn("notifications", serialized)
+        self.assertIn("15000 MAD", serialized)
+        self.assertEqual(context["extra_hints"], {"industry": "clinic"})
+
+        devis_request.refresh_from_db()
+        self.assertEqual(devis_request.client_name, "Fatima Zahra")
+        self.assertEqual(devis_request.client_email, "fatima@example.com")
+        self.assertEqual(devis_request.client_phone, "+212600000000")
+
+    @patch("apps.devis.agents.orchestrator.DevisPDFGenerator.generate")
+    @patch.object(LLMService, "generate_quote_text")
+    @patch.object(LLMService, "extract_structured_json")
+    def test_openai_devis_prompts_exclude_client_pii_but_keep_quote_context(
+        self,
+        extract_structured_json,
+        generate_quote_text,
+        pdf_generate,
+    ):
+        devis_request = self.create_private_devis_request()
+        captured_prompts = {}
+        captured_pdf_context = {}
+
+        def fake_extract(*args, **kwargs):
+            captured_prompts["requirement"] = kwargs["prompt"]
+            return kwargs["fallback"]
+
+        def fake_quote(*args, **kwargs):
+            captured_prompts["quote"] = kwargs["prompt"]
+            return kwargs["fallback"]
+
+        def fake_pdf_generate(context, output_path):
+            captured_pdf_context.update(context)
+            return str(output_path)
+
+        extract_structured_json.side_effect = fake_extract
+        generate_quote_text.side_effect = fake_quote
+        pdf_generate.side_effect = fake_pdf_generate
+
+        result = DevisService().generate_quote_from_request(devis_request)
+
+        self.assertEqual(result["status"], "processed")
+        combined_prompt = "\n".join(captured_prompts.values())
+        self.assert_no_private_values(combined_prompt, devis_request)
+        self.assertIn("booking website", combined_prompt)
+        self.assertIn("payments", combined_prompt)
+        self.assertIn("notifications", combined_prompt)
+        self.assertIn("15000 MAD", combined_prompt)
+        self.assertNotIn("client_name", combined_prompt)
+        self.assertNotIn("client_email", combined_prompt)
+        self.assertNotIn("client_phone", combined_prompt)
+        self.assertEqual(captured_pdf_context["client_name"], devis_request.client_name)
+        self.assertEqual(captured_pdf_context["client_email"], devis_request.client_email)
+        self.assertEqual(captured_pdf_context["client_phone"], devis_request.client_phone)
+
+        devis_request.refresh_from_db()
+        self.assertEqual(devis_request.client_name, "Fatima Zahra")
+        self.assertEqual(devis_request.client_email, "fatima@example.com")
+        self.assertEqual(devis_request.client_phone, "+212600000000")
+
+    @patch("apps.devis.agents.orchestrator.DevisPDFGenerator.generate")
+    @patch.object(LLMService, "generate_quote_text")
+    @patch.object(LLMService, "extract_structured_json")
+    def test_chatbot_to_devis_generation_does_not_reinject_contact_details_into_openai(
+        self,
+        extract_structured_json,
+        generate_quote_text,
+        pdf_generate,
+    ):
+        captured_prompts = {}
+
+        def fake_extract(*args, **kwargs):
+            captured_prompts["requirement"] = kwargs["prompt"]
+            return kwargs["fallback"]
+
+        def fake_quote(*args, **kwargs):
+            captured_prompts["quote"] = kwargs["prompt"]
+            return kwargs["fallback"]
+
+        extract_structured_json.side_effect = fake_extract
+        generate_quote_text.side_effect = fake_quote
+        pdf_generate.side_effect = lambda _context, output_path: str(output_path)
+
+        response = self.client.post(
+            "/api/devis/generate-from-chat/",
+            {
+                "client_name": "Fatima Zahra",
+                "client_email": "fatima@example.com",
+                "client_phone": "+212600000000",
+                "preferred_language": "fr",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Je suis Fatima Zahra, fatima@example.com, +212600000000. "
+                            "Je veux un booking website pour une clinique avec payments et notifications."
+                        ),
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        devis_request = DevisRequest.objects.get(pk=response.json()["request_id"])
+        combined_prompt = "\n".join(captured_prompts.values())
+        self.assert_no_private_values(combined_prompt, devis_request)
+        self.assertIn("booking website", combined_prompt)
+        self.assertIn("payments", combined_prompt)
+        self.assertIn("notifications", combined_prompt)
+        self.assertEqual(devis_request.client_name, "Fatima Zahra")
+        self.assertEqual(devis_request.client_email, "fatima@example.com")
+        self.assertEqual(devis_request.client_phone, "+212600000000")
+
+    def test_pdf_context_keeps_local_client_contact_information(self):
+        devis_request = self.create_private_devis_request()
+        context = PDFContextBuilder.build(
+            devis_request,
+            {
+                "estimate": {"range_min": 1000, "range_max": 2000, "currency": "MAD"},
+                "quote": {"totals": {}, "included_groups": []},
+            },
+        )
+
+        self.assertEqual(context["client_name"], "Fatima Zahra")
+        self.assertEqual(context["client_email"], "fatima@example.com")
+        self.assertEqual(context["client_phone"], "+212600000000")
 
 
 @override_settings(REST_FRAMEWORK=TEST_THROTTLE_SETTINGS)

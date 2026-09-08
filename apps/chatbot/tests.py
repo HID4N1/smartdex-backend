@@ -3,8 +3,10 @@ from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from apps.chatbot.services.business_logic import BusinessLogicEngine, QualificationNotAllowed
+from apps.chatbot.services.prompting import PromptBuilder
 from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
 from apps.chatbot.services.validation import ResponseValidator
+from core.ai.rag.chain import RAGChain
 
 
 class ChatbotBusinessLogicTests(SimpleTestCase):
@@ -158,6 +160,80 @@ class ChatbotResponseValidatorTests(SimpleTestCase):
 
         self.assertFalse(result.valid)
         self.assertIn("more than one question", result.reasons)
+
+
+class ChatbotAIPromptPrivacyTests(SimpleTestCase):
+    def test_prompt_builder_redacts_contact_details_and_tokens_but_keeps_project_context(self):
+        messages = PromptBuilder().build_messages(
+            state="pricing",
+            state_policy={
+                "objective": "answer pricing after qualification",
+                "allowed_actions": ["explain pricing"],
+                "forbidden_actions": [],
+                "next_question": "Quel delai souhaitez-vous ?",
+            },
+            decision={
+                "facts": {
+                    "project_goal": (
+                        "Fatima Zahra needs a booking website with payments. "
+                        "Contact fatima@example.com or +212600000000."
+                    ),
+                    "features": ["payments", "notifications"],
+                    "budget_hint": "15000 MAD",
+                },
+                "pricing": {"estimated_range_min": 10000, "estimated_range_max": 20000},
+            },
+            knowledge="Booking systems include calendar, payments, and notifications.",
+            history=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Je suis Fatima Zahra. Mon email est fatima@example.com, "
+                        "telephone +212600000000, token=123e4567-e89b-12d3-a456-426614174000."
+                    ),
+                }
+            ],
+            user_message="Mon telephone est +212600000000, je veux payments et notifications.",
+        )
+
+        payload = "\n".join(message["content"] for message in messages)
+
+        self.assertNotIn("fatima@example.com", payload)
+        self.assertNotIn("+212600000000", payload)
+        self.assertNotIn("123e4567-e89b-12d3-a456-426614174000", payload)
+        self.assertIn("booking website", payload)
+        self.assertIn("payments", payload)
+        self.assertIn("notifications", payload)
+        self.assertIn("15000 MAD", payload)
+
+    def test_chatbot_runtime_trace_logging_redacts_sensitive_state_values(self):
+        chain = RAGChain.__new__(RAGChain)
+
+        with self.assertLogs("core.ai.rag.chain", level="INFO") as logs:
+            chain._prequalification_result(
+                clean_query="bonjour",
+                rewritten_query="bonjour",
+                intent="greeting",
+                structured_state={
+                    "has_active_project": False,
+                    "correction_history": [
+                        {
+                            "source": (
+                                "Fatima Zahra fatima@example.com +212600000000 "
+                                "token=123e4567-e89b-12d3-a456-426614174000"
+                            )
+                        }
+                    ],
+                },
+                response_source="greeting_handler",
+                conversation_id="conversation-id",
+                is_new_conversation=False,
+            )
+
+        logged = "\n".join(logs.output)
+        self.assertNotIn("fatima@example.com", logged)
+        self.assertNotIn("+212600000000", logged)
+        self.assertNotIn("123e4567-e89b-12d3-a456-426614174000", logged)
 
 
 class ChatbotAPIRegressionTests(TestCase):

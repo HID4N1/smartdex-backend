@@ -12,6 +12,7 @@ from apps.chatbot.services.prompting import PromptBuilder
 from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
 from apps.chatbot.services.validation import ResponseValidator
 from core.ai.rag.retriever import Retriever
+from core.utils.privacy import redact_for_ai, redact_pii_text
 from core.utils.validators import sanitize_query
 
 
@@ -146,7 +147,7 @@ class RAGChain:
         lines = []
         for msg in history[-6:]:
             role = msg.get("role", "user").capitalize()
-            content = msg.get("content", "").strip()
+            content = redact_pii_text(msg.get("content", "").strip())
             if content:
                 lines.append(f"{role}: {content}")
 
@@ -163,6 +164,7 @@ class RAGChain:
             return query
 
         history_text = self._build_history_text(history)
+        safe_query = redact_pii_text(query)
 
         prompt = f"""
 You are rewriting a user's follow-up message into a standalone query for retrieval.
@@ -171,7 +173,7 @@ Conversation history:
 {history_text}
 
 Latest user message:
-{query}
+{safe_query}
 
 Return only the rewritten standalone query.
 If the latest message is already clear on its own, return it unchanged.
@@ -357,7 +359,7 @@ If the latest message is already clear on its own, return it unchanged.
             "response_source": response_source,
             "final_state": ConversationState.WAIT_FOR_PROJECT.value,
         }
-        logger.info("chatbot_runtime_trace=%s", runtime_trace)
+        logger.info("chatbot_runtime_trace=%s", redact_for_ai(runtime_trace))
         return {
             "query": clean_query,
             "rewritten_query": rewritten_query,
@@ -393,6 +395,7 @@ If the latest message is already clear on its own, return it unchanged.
 
         loaded_state = self.business_logic.initial_state(structured_state)
         rewritten_query = clean_query
+        safe_clean_query = redact_pii_text(clean_query)
         prequalification_intent = self.business_logic.detect_prequalification_intent(clean_query)
         if prequalification_intent == "greeting" and not loaded_state.get("has_active_project"):
             return self._prequalification_result(
@@ -427,7 +430,7 @@ If the latest message is already clear on its own, return it unchanged.
                 is_new_conversation=is_new_conversation,
             )
 
-        rewritten_query = self._rewrite_query_with_history(clean_query, history)
+        rewritten_query = self._rewrite_query_with_history(safe_clean_query, history)
         intent = self._detect_intent(rewritten_query)
         decision_obj = self.business_logic.analyze(
             clean_query,
@@ -495,7 +498,7 @@ If the latest message is already clear on its own, return it unchanged.
 
         try:
             docs = self.retriever.search(
-                rewritten_query,
+                redact_pii_text(rewritten_query),
                 top_k=self.top_k,
                 filter_metadata=filter_metadata,
             )
@@ -524,7 +527,6 @@ If the latest message is already clear on its own, return it unchanged.
                 "context_used": "",
             }
 
-        history_text = self._build_history_text(history)
         context = self._build_context(docs)
         messages = self.prompt_builder.build_messages(
             state=state.value,
@@ -532,7 +534,7 @@ If the latest message is already clear on its own, return it unchanged.
             decision=decision,
             knowledge=context,
             history=history,
-            user_message=clean_query,
+            user_message=safe_clean_query,
         )
 
         try:

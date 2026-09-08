@@ -15,10 +15,7 @@ class RequirementAgent:
 
     def run(self, state: AgentState) -> AgentState:
         fallback = self._heuristic_extract(state)
-        prompt = build_requirement_prompt(
-            state.input.user_message,
-            state.input.client_info.model_dump(),
-        )
+        prompt = build_requirement_prompt(state.input.ai_project_context or state.input.user_message)
         extraction = self.llm_service.extract_structured_json(
             prompt=prompt,
             schema=RequirementExtraction,
@@ -37,18 +34,23 @@ class RequirementAgent:
 
     def _heuristic_extract(self, state: AgentState) -> RequirementExtraction:
         message = state.input.user_message or ""
+        project_context = state.input.ai_project_context or {}
         lowered = message.lower()
         detected_features = []
         for raw_feature, normalized in FEATURE_MAP.items():
             if raw_feature in lowered and normalized not in detected_features:
                 detected_features.append(normalized)
 
-        project_type = None
+        project_type = project_context.get("project_type")
         for raw_type in PROJECT_TYPE_MAP:
             needle = raw_type.replace("_", " ")
-            if needle != "unknown" and needle in lowered:
+            if not project_type and needle != "unknown" and needle in lowered:
                 project_type = PROJECT_TYPE_MAP[raw_type]
                 break
+
+        for feature in project_context.get("features") or []:
+            if feature and feature not in detected_features:
+                detected_features.append(feature)
 
         budget_match = re.search(r"(?:budget|mad|dh|eur|usd|€|\$)[:\s-]*([^.\n]+)", message, re.IGNORECASE)
         timeline_match = re.search(r"(?:in|within|under)\s+([^.\n]+?(?:day|days|week|weeks|month|months))", message, re.IGNORECASE)
@@ -69,12 +71,9 @@ class RequirementAgent:
         return RequirementExtraction(
             project_type=project_type,
             detected_features=detected_features,
-            budget_range=budget_match.group(1).strip() if budget_match else None,
-            timeline=timeline_match.group(1).strip() if timeline_match else None,
-            client_name=state.input.client_info.name,
-            client_email=state.input.client_info.email,
-            client_phone=state.input.client_info.phone,
-            preferred_language=language,
+            budget_range=project_context.get("budget_range") or (budget_match.group(1).strip() if budget_match else None),
+            timeline=project_context.get("timeline") or (timeline_match.group(1).strip() if timeline_match else None),
+            preferred_language=project_context.get("preferred_language") or language,
             complexity_hint=complexity_hint,
             missing_information=missing_information,
             confidence_score=0.45 if project_type or detected_features else 0.2,

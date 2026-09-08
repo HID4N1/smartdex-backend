@@ -1,6 +1,7 @@
 from langchain_openai import ChatOpenAI
 
 from core.pricing.extractor_schema import ExtractedProjectSpec
+from core.utils.privacy import redact_pii_text
 
 
 SYSTEM_PROMPT = """
@@ -57,11 +58,11 @@ class ProjectSpecExtractor:
             SYSTEM_PROMPT.strip()
             + "\n\n"
             + USER_PROMPT_TEMPLATE.format(
-                description=description.strip(),
+                description=redact_pii_text(description.strip()),
                 project_type_hint=project_type_hint or "unknown",
                 selected_features=", ".join(selected_features) if selected_features else "none",
-                budget_hint=budget_hint or "unknown",
-                deadline_hint=deadline_hint or "unknown",
+                budget_hint=redact_pii_text(budget_hint) or "unknown",
+                deadline_hint=redact_pii_text(deadline_hint) or "unknown",
             ).strip()
         )
 
