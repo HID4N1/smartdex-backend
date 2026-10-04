@@ -32,9 +32,6 @@ def run_settings_probe(env_overrides, code):
         "SECRET_KEY",
         "USE_X_FORWARDED_PROTO",
         "DJANGO_ENV",
-        "RAILWAY_ENVIRONMENT",
-        "RAILWAY_PROJECT_ID",
-        "RAILWAY_SERVICE_ID",
         "DATABASE_URL",
     ):
         if name not in env_overrides:
@@ -55,9 +52,9 @@ class ProductionSecuritySettingsTests(SimpleTestCase):
     production_env = {
         "DJANGO_DEBUG": "false",
         "DJANGO_SECRET_KEY": "test-production-secret-key",
-        "ALLOWED_HOSTS": "api.smartdex.ma,smartdex-production.up.railway.app",
+        "ALLOWED_HOSTS": "api.smartdex.ma,smartdex-backend.example.azurecontainerapps.io",
         "CORS_ALLOWED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma",
-        "CSRF_TRUSTED_ORIGINS": "https://api.smartdex.ma,https://smartdex-production.up.railway.app",
+        "CSRF_TRUSTED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma,https://api.smartdex.ma,https://smartdex-backend.example.azurecontainerapps.io",
         "DATABASE_URL": "postgresql://user:password@db.example.com:5432/smartdex",
     }
 
@@ -107,8 +104,8 @@ assert settings.CORS_ALLOW_ALL_ORIGINS is False
 assert settings.CORS_ALLOW_CREDENTIALS is False
 assert settings.CORS_ALLOWED_ORIGINS == ["https://smartdex.ma", "https://www.smartdex.ma"]
 assert "x-devis-access-token" in settings.CORS_ALLOW_HEADERS
-assert settings.CSRF_TRUSTED_ORIGINS == ["https://api.smartdex.ma", "https://smartdex-production.up.railway.app"]
-assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-production.up.railway.app"]
+assert settings.CSRF_TRUSTED_ORIGINS == ["https://smartdex.ma", "https://www.smartdex.ma", "https://api.smartdex.ma", "https://smartdex-backend.example.azurecontainerapps.io"]
+assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.azurecontainerapps.io"]
 """,
         )
 
@@ -158,11 +155,11 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-production.up.rai
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("SECURE_HSTS_SECONDS must be an integer", result.stderr)
 
-    def test_railway_deployment_cannot_silently_run_with_debug_true(self):
+    def test_production_environment_cannot_silently_run_with_debug_true(self):
         result = run_settings_probe(
             {
                 "DJANGO_DEBUG": "true",
-                "RAILWAY_ENVIRONMENT": "production",
+                "DJANGO_ENV": "production",
                 "DJANGO_SECRET_KEY": "test-production-secret-key",
             },
             "import config.settings",

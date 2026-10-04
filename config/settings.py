@@ -124,16 +124,10 @@ SMARTDEX_TEMP_PDF_RETENTION_HOURS = env_int(
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env_bool("DJANGO_DEBUG", default=env_bool("DEBUG", default=True))
 IS_PRODUCTION = not DEBUG
-DEPLOYMENT_ENVIRONMENT = env_str("DJANGO_ENV") or env_str("RAILWAY_ENVIRONMENT")
-IS_RAILWAY_DEPLOYMENT = any(
-    env_str(name)
-    for name in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID")
-)
-if DEBUG and (
-    IS_RAILWAY_DEPLOYMENT or DEPLOYMENT_ENVIRONMENT.lower() in {"production", "prod"}
-):
+DEPLOYMENT_ENVIRONMENT = env_str("DJANGO_ENV")
+if DEBUG and DEPLOYMENT_ENVIRONMENT.lower() in {"production", "prod"}:
     raise ImproperlyConfigured(
-        "DJANGO_DEBUG must be false for Railway or production deployments."
+        "DJANGO_DEBUG must be false for production deployments."
     )
 
 # SECURITY WARNING: keep the secret key used in production secret!
