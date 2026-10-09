@@ -25,14 +25,22 @@ def run_settings_probe(env_overrides, code):
     for name in (
         "ALLOWED_HOSTS",
         "CORS_ALLOWED_ORIGINS",
+        "CORS_ALLOW_CREDENTIALS",
         "CSRF_TRUSTED_ORIGINS",
+        "CSRF_COOKIE_SAMESITE",
         "DEBUG",
         "DJANGO_DEBUG",
         "DJANGO_SECRET_KEY",
         "SECRET_KEY",
+        "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+        "SECURE_HSTS_PRELOAD",
+        "SECURE_HSTS_SECONDS",
+        "SECURE_SSL_REDIRECT",
+        "SESSION_COOKIE_SAMESITE",
         "USE_X_FORWARDED_PROTO",
         "DJANGO_ENV",
         "DATABASE_URL",
+        "OPENAI_API_KEY",
     ):
         if name not in env_overrides:
             env.pop(name, None)
@@ -52,6 +60,7 @@ class ProductionSecuritySettingsTests(SimpleTestCase):
     production_env = {
         "DJANGO_DEBUG": "false",
         "DJANGO_SECRET_KEY": "test-production-secret-key",
+        "OPENAI_API_KEY": "test-openai-key",
         "ALLOWED_HOSTS": "api.smartdex.ma,smartdex-backend.example.azurecontainerapps.io",
         "CORS_ALLOWED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma",
         "CSRF_TRUSTED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma,https://api.smartdex.ma,https://smartdex-backend.example.azurecontainerapps.io",
@@ -128,6 +137,23 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.a
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("non-placeholder value", result.stderr)
+
+    def test_missing_production_openai_key_fails_clearly(self):
+        env = dict(self.production_env)
+        env.pop("OPENAI_API_KEY")
+        result = run_settings_probe(env, "import config.settings")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPENAI_API_KEY must be set", result.stderr)
+
+    def test_placeholder_production_openai_key_fails_clearly(self):
+        result = run_settings_probe(
+            {**self.production_env, "OPENAI_API_KEY": "replace-with-openai-api-key"},
+            "import config.settings",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPENAI_API_KEY must be set", result.stderr)
 
     def test_wildcard_production_allowed_hosts_fails_clearly(self):
         result = run_settings_probe(
@@ -257,5 +283,5 @@ class EnvironmentExampleTests(SimpleTestCase):
 
         self.assertNotRegex(text, r"sk-[A-Za-z0-9_-]{20,}")
         self.assertNotIn("aws-1-eu-west-1.pooler.supabase.com", text)
-        self.assertIn("your-openai-api-key", text)
-        self.assertIn("change-me", text)
+        self.assertIn("replace-with-openai-api-key", text)
+        self.assertIn("replace-with-local-development-secret", text)

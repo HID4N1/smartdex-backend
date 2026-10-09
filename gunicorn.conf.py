@@ -31,5 +31,6 @@ preload_app = os.getenv("GUNICORN_PRELOAD", "false").strip().lower() in {
 
 accesslog = "-"
 errorlog = "-"
+access_log_format = '%(h)s "%(m)s %(U)s %(H)s" %(s)s %(b)s %(L)s'
 capture_output = True
 loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")

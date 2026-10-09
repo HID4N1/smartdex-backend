@@ -80,7 +80,15 @@ def require_production_setting(condition, message):
 
 
 DEFAULT_SECRET_KEY = "l;skndflknsdFO;SDFLSKFNBSLAKFSL,DJF"
-PLACEHOLDER_SECRET_KEYS = {DEFAULT_SECRET_KEY, "change-me", "changeme"}
+PLACEHOLDER_VALUES = {
+    DEFAULT_SECRET_KEY,
+    "change-me",
+    "changeme",
+    "replace-with-local-development-secret",
+    "replace-with-openai-api-key",
+    "REPLACE_WITH_REAL_VALUE",
+}
+PLACEHOLDER_SECRET_KEYS = PLACEHOLDER_VALUES
 DEFAULT_ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
@@ -139,6 +147,10 @@ if IS_PRODUCTION:
     require_production_setting(
         SECRET_KEY and SECRET_KEY not in PLACEHOLDER_SECRET_KEYS,
         "DJANGO_SECRET_KEY or SECRET_KEY must be set to a non-placeholder value when DEBUG is false.",
+    )
+    require_production_setting(
+        OPENAI_API_KEY and OPENAI_API_KEY not in PLACEHOLDER_VALUES,
+        "OPENAI_API_KEY must be set to a non-placeholder value when DEBUG is false.",
     )
 
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=DEFAULT_ALLOWED_HOSTS)

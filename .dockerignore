@@ -1,0 +1,78 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+*service-account*.json
+
+# Git and CI metadata not required at runtime
+.git/
+.gitignore
+.github/
+
+# Python/dev environments
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+**/*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+
+# Test, coverage, and audit artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+requirements-dev.txt
+**/tests.py
+**/tests_*.py
+manual_audit.sqlite3
+manual_prod_audit.sqlite3
+
+# Local runtime files
+db.sqlite3
+*.sqlite3
+*.sqlite
+*.db
+*.dump
+*.sql
+*.log
+logs/
+media/
+staticfiles/
+
+# Build/editor/OS artifacts
+build/
+dist/
+downloads/
+wheels/
+*.egg
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation is not required by the API runtime.
+docs/
+README.md
+PROJECT_DOCUMENTATION.md
+build.sh
+.python-version
+
+# Keep chroma_db/ in the build context for Step 2 so the validated local
+# smartdex_kb artifact can be packaged with the image. Do not add it here yet.
+!chroma_db/
+!chroma_db/**
