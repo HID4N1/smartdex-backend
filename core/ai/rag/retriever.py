@@ -24,7 +24,7 @@ class Retriever:
             path=settings.CHROMA_DIR
         )
 
-        self.collection = self.client.get_or_create_collection(
+        self.collection = self.client.get_collection(
             name=collection_name
         )
 

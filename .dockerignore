@@ -72,7 +72,6 @@ PROJECT_DOCUMENTATION.md
 build.sh
 .python-version
 
-# Keep chroma_db/ in the build context for Step 2 so the validated local
-# smartdex_kb artifact can be packaged with the image. Do not add it here yet.
+# Keep only the validated Chroma artifact needed for the immutable image seed.
 !chroma_db/
 !chroma_db/**

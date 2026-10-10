@@ -98,7 +98,12 @@ DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS = [
     "https://smartdex.ma",
     "https://www.smartdex.ma",
 ]
+CHROMA_SEED_DIR = os.getenv("CHROMA_SEED_DIR", str(BASE_DIR / "chroma_db"))
 CHROMA_DIR = os.getenv("CHROMA_DIR", str(BASE_DIR / "chroma_db"))
+CHROMA_MANIFEST_PATH = os.getenv(
+    "CHROMA_MANIFEST_PATH",
+    str(BASE_DIR / "chroma_index_manifest.json"),
+)
 OPENAI_API_KEY = env_str("OPENAI_API_KEY")
 SMARTDEX_PRIVACY_NOTICE_VERSION = env_str(
     "SMARTDEX_PRIVACY_NOTICE_VERSION",

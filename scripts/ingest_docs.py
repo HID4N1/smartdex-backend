@@ -115,7 +115,9 @@ def ingest():
     chunks = build_chunks(documents)
     print(f"Created {len(chunks)} chunks")
 
-    vectorstore = VectorStore()
+    # Collection creation is intentionally confined to this manually invoked
+    # maintenance command. The production API only loads an existing collection.
+    vectorstore = VectorStore(allow_create=True)
 
     print("Storing embeddings...")
 

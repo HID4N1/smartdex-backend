@@ -4,14 +4,19 @@ from openai import OpenAI
 import os
 
 class VectorStore:
-    def __init__(self):
+    """Explicit maintenance-only writer used by the ingestion script."""
+
+    def __init__(self, allow_create=False):
         self.client = chromadb.PersistentClient(
             path=settings.CHROMA_DIR
         )
 
-        self.collection = self.client.get_or_create_collection(
-            name="smartdex_kb"
+        collection_loader = (
+            self.client.get_or_create_collection
+            if allow_create
+            else self.client.get_collection
         )
+        self.collection = collection_loader(name="smartdex_kb")
 
         self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 

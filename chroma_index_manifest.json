@@ -1,0 +1,21 @@
+{
+  "manifest_schema": 1,
+  "index_version": "chroma-index-v1",
+  "collection_name": "smartdex_kb",
+  "document_count": 101,
+  "embedding_model": "text-embedding-3-small",
+  "artifact_created_at": "2026-10-10T00:04:29Z",
+  "required_metadata_keys": [
+    "source",
+    "doc_type",
+    "chunk_index",
+    "total_chunks"
+  ],
+  "checksums": {
+    "chroma.sqlite3": "b88694a612bdc8b5a70525bd8294e4fad67ce83cc6fc8d3448f4a2bd83791ff3",
+    "a43288ba-36c2-4778-a396-08e7dea1f1a3/data_level0.bin": "3c91f68533cc433f01dc2832f6339552f18b85174258c7d2f373ddca40ad11ed",
+    "a43288ba-36c2-4778-a396-08e7dea1f1a3/header.bin": "b081be2c2276a57e995075c7de2f3cb25e903798aac36d98042045533ab28f7d",
+    "a43288ba-36c2-4778-a396-08e7dea1f1a3/length.bin": "7a12e561363385e9dfeeab326368731c030ed4b374e7f5897ac819159d2884c5",
+    "a43288ba-36c2-4778-a396-08e7dea1f1a3/link_lists.bin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+}
