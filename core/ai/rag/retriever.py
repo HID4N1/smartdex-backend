@@ -1,13 +1,11 @@
 from typing import List, Dict, Optional
 import chromadb
 from django.conf import settings
-from openai import OpenAI
-import os
 import logging
 import re
 import unicodedata
 
-from core.utils.privacy import sanitize_for_log
+from core.ai.provider import AIOperationRunner, build_openai_client, create_embeddings
 
 
 logger = logging.getLogger(__name__)
@@ -16,9 +14,12 @@ logger = logging.getLogger(__name__)
 class Retriever:
     def __init__(
         self,
-        collection_name: str = "smartdex_kb"
+        collection_name: str = "smartdex_kb",
+        openai_client=None,
+        ai_runner=None,
     ):
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "missing-openai-api-key")
+        self.openai_client = openai_client or build_openai_client()
+        self.ai_runner = ai_runner or AIOperationRunner()
 
         self.client = chromadb.PersistentClient(
             path=settings.CHROMA_DIR
@@ -29,11 +30,13 @@ class Retriever:
         )
 
     def embed_query(self, text: str) -> List[float]:
-        response = self.openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return response.data[0].embedding
+        return create_embeddings(
+            client=self.openai_client,
+            runner=self.ai_runner,
+            operation="rag_query_embedding",
+            model=settings.OPENAI_EMBEDDING_MODEL,
+            inputs=text,
+        )[0]
 
     def search(
         self,
@@ -41,6 +44,7 @@ class Retriever:
         top_k: int = 8,
         filter_metadata: Optional[Dict] = None
     ) -> List[Dict]:
+        top_k = max(1, min(top_k, settings.OPENAI_RAG_MAX_TOP_K))
         try:
             query_embedding = self.embed_query(query)
 
@@ -51,8 +55,8 @@ class Retriever:
             )
         except Exception as exc:
             logger.warning(
-                "Embedding search failed. Falling back to lexical search: %s",
-                sanitize_for_log(str(exc)),
+                "rag_embedding_fallback category=%s",
+                getattr(exc, "category", "retrieval_error"),
             )
             return self._lexical_search(
                 query=query,

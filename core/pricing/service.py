@@ -5,8 +5,8 @@ from core.pricing.quote_builder import build_quote
 
 
 class DevisService:
-    def __init__(self):
-        self.extractor = ProjectSpecExtractor()
+    def __init__(self, extractor=None):
+        self.extractor = extractor
 
     def generate_from_normalized_spec(
         self,
@@ -44,7 +44,8 @@ class DevisService:
         budget_hint: str | None = None,
         deadline_hint: str | None = None,
     ) -> dict:
-        extracted_spec = self.extractor.extract(
+        extractor = self.extractor or ProjectSpecExtractor()
+        extracted_spec = extractor.extract(
             description=description,
             project_type_hint=project_type_hint,
             selected_features=selected_features,

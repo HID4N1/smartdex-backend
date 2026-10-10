@@ -155,6 +155,22 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.a
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("OPENAI_API_KEY must be set", result.stderr)
 
+    def test_negative_openai_timeout_fails_at_startup(self):
+        result = run_settings_probe(
+            {**self.production_env, "OPENAI_REQUEST_TIMEOUT_SECONDS": "-1"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPENAI_REQUEST_TIMEOUT_SECONDS must be greater than zero", result.stderr)
+
+    def test_unbounded_openai_retries_fail_at_startup(self):
+        result = run_settings_probe(
+            {**self.production_env, "OPENAI_MAX_RETRIES": "99"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("OPENAI_MAX_RETRIES must be between 0 and 2", result.stderr)
+
     def test_wildcard_production_allowed_hosts_fails_clearly(self):
         result = run_settings_probe(
             {**self.production_env, "ALLOWED_HOSTS": "*"},

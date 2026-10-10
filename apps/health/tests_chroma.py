@@ -179,10 +179,10 @@ class ChromaRuntimeInitializationTests(SimpleTestCase):
 
 class RetrievalOnlyCollectionTests(SimpleTestCase):
     @override_settings(CHROMA_DIR="/temporary/runtime-index")
-    @patch("core.ai.rag.retriever.OpenAI")
+    @patch("core.ai.rag.retriever.build_openai_client")
     @patch("core.ai.rag.retriever.chromadb.PersistentClient")
     def test_retriever_loads_existing_collection_without_creation(
-        self, persistent_client, openai_client
+        self, persistent_client, openai_client_factory
     ):
         collection = Mock()
         persistent_client.return_value.get_collection.return_value = collection
@@ -194,12 +194,12 @@ class RetrievalOnlyCollectionTests(SimpleTestCase):
             name="smartdex_kb"
         )
         self.assertFalse(persistent_client.return_value.get_or_create_collection.called)
-        openai_client.assert_called_once()
+        openai_client_factory.assert_called_once()
 
     @override_settings(CHROMA_DIR="/temporary/runtime-index")
-    @patch("core.ai.rag.retriever.OpenAI")
+    @patch("core.ai.rag.retriever.build_openai_client")
     @patch("core.ai.rag.retriever.chromadb.PersistentClient")
-    def test_missing_collection_fails_cleanly(self, persistent_client, _openai_client):
+    def test_missing_collection_fails_cleanly(self, persistent_client, _openai_client_factory):
         persistent_client.return_value.get_collection.side_effect = ValueError(
             "Collection smartdex_kb does not exist"
         )

@@ -2,17 +2,17 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import List, Dict, Optional
 import logging
-import os
 import unicodedata
 
-from openai import OpenAI
+from django.conf import settings
 
 from apps.chatbot.services.business_logic import BusinessLogicEngine
 from apps.chatbot.services.prompting import PromptBuilder
 from apps.chatbot.services.state_machine import ConversationState, SalesStateMachine
 from apps.chatbot.services.validation import ResponseValidator
+from core.ai.provider import AIOperationRunner, build_openai_client, chat_completion_text
 from core.ai.rag.retriever import Retriever
-from core.utils.privacy import redact_for_ai, redact_pii_text, sanitize_for_log
+from core.utils.privacy import redact_pii_text
 from core.utils.validators import sanitize_query
 
 
@@ -54,16 +54,23 @@ class RAGChain:
         prompt_path: Optional[str] = None,
         top_k: int = 8,
         rerank_top_n: int = 4,
-        model: str = "gpt-4.1-mini",
+        model: Optional[str] = None,
         max_distance: float = 1.8,
+        openai_client=None,
+        ai_runner=None,
+        retriever=None,
     ):
-        self.retriever = Retriever()
-        self.top_k = top_k
+        self.ai_runner = ai_runner or AIOperationRunner()
+        self.client = openai_client or build_openai_client()
+        self.retriever = retriever or Retriever(
+            openai_client=self.client,
+            ai_runner=self.ai_runner,
+        )
+        self.top_k = min(max(1, top_k), settings.OPENAI_RAG_MAX_TOP_K)
         self.rerank_top_n = rerank_top_n
-        self.model = model
+        self.model = model or settings.OPENAI_CHAT_MODEL
         self.max_distance = max_distance
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.client = OpenAI(api_key=self.api_key or "missing-openai-api-key")
+        self.api_key = settings.OPENAI_API_KEY
         self.prompt_template = self._load_prompt(prompt_path)
         self.business_logic = BusinessLogicEngine()
         self.state_machine = SalesStateMachine()
@@ -180,16 +187,18 @@ If the latest message is already clear on its own, return it unchanged.
 """
 
         try:
-            response = self.client.chat.completions.create(
+            return chat_completion_text(
+                client=self.client,
+                runner=self.ai_runner,
+                operation="chat_query_rewrite",
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "Rewrite follow-up questions into standalone retrieval queries."},
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0,
+                max_output_tokens=settings.OPENAI_REWRITE_MAX_OUTPUT_TOKENS,
             )
-            rewritten = (response.choices[0].message.content or "").strip()
-            return rewritten or query
         except Exception:
             return query
 
@@ -255,6 +264,8 @@ If the latest message is already clear on its own, return it unchanged.
 
     def _build_context(self, docs: List[Dict]) -> str:
         context_blocks = []
+        context_length = 0
+        maximum_length = settings.OPENAI_RAG_CONTEXT_MAX_CHARACTERS
 
         for doc in docs:
             metadata = doc.get("metadata", {})
@@ -267,7 +278,14 @@ If the latest message is already clear on its own, return it unchanged.
                 continue
 
             block = f"[SOURCE: {source} | CHUNK: {chunk_index} | TYPE: {doc_type}]\n{text}"
+            separator_length = 2 if context_blocks else 0
+            remaining = maximum_length - context_length - separator_length
+            if remaining <= 0:
+                break
+            if len(block) > remaining:
+                block = block[:remaining]
             context_blocks.append(block)
+            context_length += separator_length + len(block)
 
         return "\n\n".join(context_blocks)
 
@@ -279,14 +297,16 @@ If the latest message is already clear on its own, return it unchanged.
         )
 
     def _generate(self, messages: List[Dict], temperature: float = 0.2) -> str:
-        response = self.client.chat.completions.create(
+        return chat_completion_text(
+            client=self.client,
+            runner=self.ai_runner,
+            operation="chat_answer_generation",
             model=self.model,
             messages=messages,
             temperature=temperature,
             top_p=0.8,
-            max_tokens=220,
+            max_output_tokens=settings.OPENAI_CHAT_MAX_OUTPUT_TOKENS,
         )
-        return (response.choices[0].message.content or "").strip()
 
     def _generate_local_fallback(
         self,
@@ -359,7 +379,13 @@ If the latest message is already clear on its own, return it unchanged.
             "response_source": response_source,
             "final_state": ConversationState.WAIT_FOR_PROJECT.value,
         }
-        logger.info("chatbot_runtime_trace=%s", redact_for_ai(runtime_trace))
+        logger.info(
+            "chatbot_transition intent=%s state=%s handler=%s new_conversation=%s",
+            intent,
+            ConversationState.WAIT_FOR_PROJECT.value,
+            response_source,
+            bool(is_new_conversation),
+        )
         return {
             "query": clean_query,
             "rewritten_query": rewritten_query,
@@ -502,8 +528,11 @@ If the latest message is already clear on its own, return it unchanged.
                 top_k=self.top_k,
                 filter_metadata=filter_metadata,
             )
-        except Exception as e:
-            logger.error("Retriever failed: %s", sanitize_for_log(str(e)))
+        except Exception as exc:
+            logger.error(
+                "rag_retrieval_failed category=%s",
+                getattr(exc, "category", "retrieval_error"),
+            )
             return {
                 "query": clean_query,
                 "rewritten_query": rewritten_query,
@@ -574,10 +603,10 @@ If the latest message is already clear on its own, return it unchanged.
                         allow_pricing,
                         structured_state=structured_state,
                     )
-        except Exception as e:
+        except Exception as exc:
             logger.warning(
-                "LLM generation failed. Using local fallback answer: %s",
-                sanitize_for_log(str(e)),
+                "chat_generation_fallback category=%s",
+                getattr(exc, "category", "generation_error"),
             )
             answer = self._generate_local_fallback(
                 state_policy,

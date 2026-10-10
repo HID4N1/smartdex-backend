@@ -49,6 +49,16 @@ def env_int(name, default=0):
         raise ImproperlyConfigured(f"{name} must be an integer.")
 
 
+def env_float(name, default=0.0):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return float(value.strip())
+    except ValueError:
+        raise ImproperlyConfigured(f"{name} must be a number.")
+
+
 def env_list(name, default=None):
     value = os.getenv(name)
     if not value:
@@ -105,6 +115,137 @@ CHROMA_MANIFEST_PATH = os.getenv(
     str(BASE_DIR / "chroma_index_manifest.json"),
 )
 OPENAI_API_KEY = env_str("OPENAI_API_KEY")
+OPENAI_EXTERNAL_CALLS_ENABLED = env_bool(
+    "OPENAI_EXTERNAL_CALLS_ENABLED",
+    default=True,
+)
+OPENAI_CHAT_MODEL = env_str("OPENAI_CHAT_MODEL", default="gpt-4.1-mini")
+OPENAI_EMBEDDING_MODEL = env_str(
+    "OPENAI_EMBEDDING_MODEL",
+    default="text-embedding-3-small",
+)
+OPENAI_REQUEST_TIMEOUT_SECONDS = env_float(
+    "OPENAI_REQUEST_TIMEOUT_SECONDS",
+    default=8.0,
+)
+OPENAI_CONNECT_TIMEOUT_SECONDS = env_float(
+    "OPENAI_CONNECT_TIMEOUT_SECONDS",
+    default=2.0,
+)
+OPENAI_OPERATION_DEADLINE_SECONDS = env_float(
+    "OPENAI_OPERATION_DEADLINE_SECONDS",
+    default=17.0,
+)
+OPENAI_MAX_RETRIES = env_int("OPENAI_MAX_RETRIES", default=1)
+OPENAI_RETRY_BASE_DELAY_SECONDS = env_float(
+    "OPENAI_RETRY_BASE_DELAY_SECONDS",
+    default=0.25,
+)
+OPENAI_RETRY_MAX_DELAY_SECONDS = env_float(
+    "OPENAI_RETRY_MAX_DELAY_SECONDS",
+    default=1.0,
+)
+OPENAI_CHAT_MAX_OUTPUT_TOKENS = env_int(
+    "OPENAI_CHAT_MAX_OUTPUT_TOKENS",
+    default=220,
+)
+OPENAI_REWRITE_MAX_OUTPUT_TOKENS = env_int(
+    "OPENAI_REWRITE_MAX_OUTPUT_TOKENS",
+    default=80,
+)
+OPENAI_STRUCTURED_MAX_OUTPUT_TOKENS = env_int(
+    "OPENAI_STRUCTURED_MAX_OUTPUT_TOKENS",
+    default=800,
+)
+OPENAI_EMBEDDING_BATCH_SIZE = env_int(
+    "OPENAI_EMBEDDING_BATCH_SIZE",
+    default=64,
+)
+OPENAI_MAX_INPUT_CHARACTERS = env_int(
+    "OPENAI_MAX_INPUT_CHARACTERS",
+    default=30000,
+)
+OPENAI_RAG_CONTEXT_MAX_CHARACTERS = env_int(
+    "OPENAI_RAG_CONTEXT_MAX_CHARACTERS",
+    default=12000,
+)
+OPENAI_RAG_MAX_TOP_K = env_int("OPENAI_RAG_MAX_TOP_K", default=12)
+UPSTREAM_REQUEST_TIMEOUT_SECONDS = env_float(
+    "UPSTREAM_REQUEST_TIMEOUT_SECONDS",
+    default=110.0,
+)
+
+
+def _validate_openai_configuration():
+    positive_values = {
+        "OPENAI_REQUEST_TIMEOUT_SECONDS": OPENAI_REQUEST_TIMEOUT_SECONDS,
+        "OPENAI_CONNECT_TIMEOUT_SECONDS": OPENAI_CONNECT_TIMEOUT_SECONDS,
+        "OPENAI_OPERATION_DEADLINE_SECONDS": OPENAI_OPERATION_DEADLINE_SECONDS,
+        "UPSTREAM_REQUEST_TIMEOUT_SECONDS": UPSTREAM_REQUEST_TIMEOUT_SECONDS,
+    }
+    for name, value in positive_values.items():
+        if value <= 0:
+            raise ImproperlyConfigured(f"{name} must be greater than zero.")
+    if OPENAI_CONNECT_TIMEOUT_SECONDS > OPENAI_REQUEST_TIMEOUT_SECONDS:
+        raise ImproperlyConfigured(
+            "OPENAI_CONNECT_TIMEOUT_SECONDS cannot exceed OPENAI_REQUEST_TIMEOUT_SECONDS."
+        )
+    if not 0 <= OPENAI_MAX_RETRIES <= 2:
+        raise ImproperlyConfigured("OPENAI_MAX_RETRIES must be between 0 and 2.")
+    if OPENAI_RETRY_BASE_DELAY_SECONDS < 0 or OPENAI_RETRY_MAX_DELAY_SECONDS < 0:
+        raise ImproperlyConfigured("OpenAI retry delays cannot be negative.")
+    if OPENAI_RETRY_MAX_DELAY_SECONDS < OPENAI_RETRY_BASE_DELAY_SECONDS:
+        raise ImproperlyConfigured(
+            "OPENAI_RETRY_MAX_DELAY_SECONDS cannot be less than the base delay."
+        )
+
+    maximum_backoff = sum(
+        min(
+            OPENAI_RETRY_MAX_DELAY_SECONDS,
+            OPENAI_RETRY_BASE_DELAY_SECONDS * (2 ** retry_index),
+        )
+        for retry_index in range(OPENAI_MAX_RETRIES)
+    )
+    operation_worst_case = (
+        OPENAI_REQUEST_TIMEOUT_SECONDS * (OPENAI_MAX_RETRIES + 1)
+        + maximum_backoff
+    )
+    if operation_worst_case > OPENAI_OPERATION_DEADLINE_SECONDS:
+        raise ImproperlyConfigured(
+            "OpenAI timeout/retry configuration exceeds OPENAI_OPERATION_DEADLINE_SECONDS."
+        )
+
+    integer_limits = {
+        "OPENAI_CHAT_MAX_OUTPUT_TOKENS": (OPENAI_CHAT_MAX_OUTPUT_TOKENS, 1, 4096),
+        "OPENAI_REWRITE_MAX_OUTPUT_TOKENS": (OPENAI_REWRITE_MAX_OUTPUT_TOKENS, 1, 1024),
+        "OPENAI_STRUCTURED_MAX_OUTPUT_TOKENS": (OPENAI_STRUCTURED_MAX_OUTPUT_TOKENS, 1, 4096),
+        "OPENAI_EMBEDDING_BATCH_SIZE": (OPENAI_EMBEDDING_BATCH_SIZE, 1, 256),
+        "OPENAI_MAX_INPUT_CHARACTERS": (OPENAI_MAX_INPUT_CHARACTERS, 1000, 100000),
+        "OPENAI_RAG_CONTEXT_MAX_CHARACTERS": (OPENAI_RAG_CONTEXT_MAX_CHARACTERS, 1000, 50000),
+        "OPENAI_RAG_MAX_TOP_K": (OPENAI_RAG_MAX_TOP_K, 1, 20),
+    }
+    for name, (value, minimum, maximum) in integer_limits.items():
+        if not minimum <= value <= maximum:
+            raise ImproperlyConfigured(
+                f"{name} must be between {minimum} and {maximum}."
+            )
+
+    gunicorn_timeout = env_float("GUNICORN_TIMEOUT", default=120.0)
+    maximum_ai_operations_per_request = 4
+    ai_request_worst_case = (
+        OPENAI_OPERATION_DEADLINE_SECONDS * maximum_ai_operations_per_request
+    )
+    if ai_request_worst_case >= gunicorn_timeout:
+        raise ImproperlyConfigured(
+            "OpenAI worst-case request budget must remain below GUNICORN_TIMEOUT."
+        )
+    if ai_request_worst_case >= UPSTREAM_REQUEST_TIMEOUT_SECONDS:
+        raise ImproperlyConfigured(
+            "OpenAI worst-case request budget must remain below UPSTREAM_REQUEST_TIMEOUT_SECONDS."
+        )
+
+
+_validate_openai_configuration()
 SMARTDEX_PRIVACY_NOTICE_VERSION = env_str(
     "SMARTDEX_PRIVACY_NOTICE_VERSION",
     default="2026-09-08",

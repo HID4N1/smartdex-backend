@@ -1,5 +1,11 @@
-from langchain_openai import ChatOpenAI
+from django.conf import settings
 
+from core.ai.provider import (
+    AIMalformedResponseError,
+    AIOperationRunner,
+    build_chat_model,
+    enforce_input_limit,
+)
 from core.pricing.extractor_schema import ExtractedProjectSpec
 from core.utils.privacy import redact_pii_text
 
@@ -33,10 +39,13 @@ deadline_hint: {deadline_hint}
 
 
 class ProjectSpecExtractor:
-    def __init__(self, model: str = "gpt-4.1-mini"):
-        self.llm = ChatOpenAI(
-            model=model,
+    def __init__(self, model: str | None = None, ai_runner=None):
+        self.model = model or settings.OPENAI_CHAT_MODEL
+        self.ai_runner = ai_runner or AIOperationRunner()
+        self.llm = build_chat_model(
+            model=self.model,
             temperature=0,
+            max_output_tokens=settings.OPENAI_STRUCTURED_MAX_OUTPUT_TOKENS,
         )
 
         self.structured_llm = self.llm.with_structured_output(
@@ -66,5 +75,19 @@ class ProjectSpecExtractor:
             ).strip()
         )
 
-        result = self.structured_llm.invoke(prompt)
-        return result
+        enforce_input_limit(prompt)
+
+        def request():
+            result = self.structured_llm.invoke(prompt)
+            if not isinstance(result, ExtractedProjectSpec):
+                try:
+                    return ExtractedProjectSpec.model_validate(result)
+                except Exception:
+                    raise AIMalformedResponseError() from None
+            return result
+
+        return self.ai_runner.run(
+            operation="pricing_project_extraction",
+            model=self.model,
+            call=request,
+        )

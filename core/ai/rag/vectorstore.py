@@ -1,12 +1,12 @@
 import chromadb
 from django.conf import settings
-from openai import OpenAI
-import os
+
+from core.ai.provider import AIOperationRunner, build_openai_client, create_embeddings
 
 class VectorStore:
     """Explicit maintenance-only writer used by the ingestion script."""
 
-    def __init__(self, allow_create=False):
+    def __init__(self, allow_create=False, openai_client=None, ai_runner=None):
         self.client = chromadb.PersistentClient(
             path=settings.CHROMA_DIR
         )
@@ -18,14 +18,23 @@ class VectorStore:
         )
         self.collection = collection_loader(name="smartdex_kb")
 
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = openai_client or build_openai_client()
+        self.ai_runner = ai_runner or AIOperationRunner()
 
     def embed_texts(self, texts):
-        response = self.openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=texts
-        )
-        return [d.embedding for d in response.data]
+        embeddings = []
+        batch_size = settings.OPENAI_EMBEDDING_BATCH_SIZE
+        for start in range(0, len(texts), batch_size):
+            embeddings.extend(
+                create_embeddings(
+                    client=self.openai_client,
+                    runner=self.ai_runner,
+                    operation="knowledge_base_embedding",
+                    model=settings.OPENAI_EMBEDDING_MODEL,
+                    inputs=texts[start:start + batch_size],
+                )
+            )
+        return embeddings
 
     def add_documents(self, ids, texts, metadatas):
         embeddings = self.embed_texts(texts)

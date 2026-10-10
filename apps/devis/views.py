@@ -20,7 +20,6 @@ from apps.devis.serializers import (
     GeneratedQuoteResponseSerializer,
 )
 from apps.devis.services.devis_services import DevisService
-from core.utils.privacy import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +159,8 @@ class GenerateDevisFromChatView(APIView):
             result = service.generate_quote_from_request(devis_request)
         except Exception as exc:
             logger.error(
-                "Unexpected error while generating devis from chat context: %s",
-                sanitize_for_log(str(exc)),
+                "devis_from_chat_failed error_type=%s",
+                type(exc).__name__,
             )
             return Response(
                 {

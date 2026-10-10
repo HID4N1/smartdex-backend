@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
+from chromadb.errors import ChromaError
 
 from apps.chatbot.models import Conversation, ChatMessage
 from apps.chatbot.serializers import ChatRequestSerializer, ConversationSerializer
@@ -27,6 +28,17 @@ class ChatbotAPIView(APIView):
         message = serializer.validated_data["message"]
         conversation_id = serializer.validated_data.get("conversation_id")
         is_new_conversation = False
+
+        try:
+            rag = RAGChain()
+        except ChromaError:
+            return Response(
+                {
+                    "detail": "Knowledge retrieval is temporarily unavailable.",
+                    "error": "knowledge_dependency_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         if conversation_id:
             conversation = Conversation.objects.filter(id=conversation_id).first()
@@ -64,7 +76,6 @@ class ChatbotAPIView(APIView):
 
         history = [*existing_history, {"role": "user", "content": message}]
 
-        rag = RAGChain()
         result = rag.run(
             message,
             history=history[:-1],
