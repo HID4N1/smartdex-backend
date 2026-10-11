@@ -2,10 +2,15 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 from django.conf import settings
-from django.test import SimpleTestCase
+from django.contrib.staticfiles import finders
+from django.test import Client, SimpleTestCase, TestCase, override_settings
+from rest_framework.test import APIRequestFactory
 
+from apps.health.views import readiness_check
+from core.utils.exception_handlers import public_exception_handler
 from core.utils.privacy import redact_url_query, sanitize_for_log
 
 
@@ -40,6 +45,11 @@ def run_settings_probe(env_overrides, code):
         "USE_X_FORWARDED_PROTO",
         "DJANGO_ENV",
         "DATABASE_URL",
+        "DB_CONN_HEALTH_CHECKS",
+        "DB_CONN_MAX_AGE",
+        "DB_CONNECT_TIMEOUT_SECONDS",
+        "DB_POOL_MODE",
+        "DB_STATEMENT_TIMEOUT_MS",
         "OPENAI_API_KEY",
     ):
         if name not in env_overrides:
@@ -58,13 +68,15 @@ def run_settings_probe(env_overrides, code):
 
 class ProductionSecuritySettingsTests(SimpleTestCase):
     production_env = {
+        "DJANGO_ENV": "production",
         "DJANGO_DEBUG": "false",
         "DJANGO_SECRET_KEY": "test-production-secret-key",
         "OPENAI_API_KEY": "test-openai-key",
         "ALLOWED_HOSTS": "api.smartdex.ma,smartdex-backend.example.azurecontainerapps.io",
-        "CORS_ALLOWED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma",
-        "CSRF_TRUSTED_ORIGINS": "https://smartdex.ma,https://www.smartdex.ma,https://api.smartdex.ma,https://smartdex-backend.example.azurecontainerapps.io",
+        "CORS_ALLOWED_ORIGINS": "https://www.smartdex.ma",
+        "CSRF_TRUSTED_ORIGINS": "",
         "DATABASE_URL": "postgresql://user:password@db.example.com:5432/smartdex",
+        "USE_X_FORWARDED_PROTO": "true",
     }
 
     def probe(self, code, env_overrides=None):
@@ -111,10 +123,12 @@ from django.conf import settings
 assert settings.REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] == ["rest_framework.renderers.JSONRenderer"]
 assert settings.CORS_ALLOW_ALL_ORIGINS is False
 assert settings.CORS_ALLOW_CREDENTIALS is False
-assert settings.CORS_ALLOWED_ORIGINS == ["https://smartdex.ma", "https://www.smartdex.ma"]
+assert settings.CORS_ALLOWED_ORIGINS == ["https://www.smartdex.ma"]
 assert "x-devis-access-token" in settings.CORS_ALLOW_HEADERS
-assert settings.CSRF_TRUSTED_ORIGINS == ["https://smartdex.ma", "https://www.smartdex.ma", "https://api.smartdex.ma", "https://smartdex-backend.example.azurecontainerapps.io"]
+assert settings.CSRF_TRUSTED_ORIGINS == []
 assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.azurecontainerapps.io"]
+assert settings.REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] == ["rest_framework.authentication.SessionAuthentication"]
+assert settings.REST_FRAMEWORK["PAGE_SIZE"] == 50
 """,
         )
 
@@ -180,6 +194,38 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.a
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ALLOWED_HOSTS must list explicit production hostnames", result.stderr)
 
+    def test_empty_production_allowed_hosts_fails_clearly(self):
+        result = run_settings_probe(
+            {**self.production_env, "ALLOWED_HOSTS": ""},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ALLOWED_HOSTS must not be empty", result.stderr)
+
+    def test_production_api_hostname_is_required(self):
+        result = run_settings_probe(
+            {**self.production_env, "ALLOWED_HOSTS": "example.azurecontainerapps.io"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must include api.smartdex.ma", result.stderr)
+
+    def test_invalid_or_wildcard_cors_origin_fails(self):
+        for origin in ("*", "https://*.smartdex.ma", "https://www.smartdex.ma/path"):
+            result = run_settings_probe(
+                {**self.production_env, "CORS_ALLOWED_ORIGINS": origin},
+                "import config.settings",
+            )
+            self.assertNotEqual(result.returncode, 0)
+
+    def test_apex_origin_does_not_replace_www_origin(self):
+        result = run_settings_probe(
+            {**self.production_env, "CORS_ALLOWED_ORIGINS": "https://smartdex.ma"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("https://www.smartdex.ma", result.stderr)
+
     def test_missing_production_database_url_fails_clearly(self):
         env = dict(self.production_env)
         env.pop("DATABASE_URL")
@@ -187,6 +233,39 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.a
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("DATABASE_URL must be set", result.stderr)
+
+    def test_production_sqlite_database_is_rejected(self):
+        result = run_settings_probe(
+            {**self.production_env, "DATABASE_URL": "sqlite:///production.sqlite3"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must use PostgreSQL", result.stderr)
+
+    def test_production_database_tls_cannot_be_disabled(self):
+        result = run_settings_probe(
+            {
+                **self.production_env,
+                "DATABASE_URL": "postgresql://user:password@db.example.com/smartdex?sslmode=disable",
+            },
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("sslmode=require", result.stderr)
+
+    def test_supabase_transaction_pooler_settings_are_explicit(self):
+        self.probe(
+            """
+from django.conf import settings
+database = settings.DATABASES["default"]
+assert database["CONN_MAX_AGE"] == 60
+assert database["CONN_HEALTH_CHECKS"] is True
+assert database["DISABLE_SERVER_SIDE_CURSORS"] is True
+assert database["OPTIONS"]["sslmode"] == "require"
+assert database["OPTIONS"]["connect_timeout"] == 10
+assert "statement_timeout=30000" in database["OPTIONS"]["options"]
+""",
+        )
 
     def test_invalid_integer_security_setting_fails_clearly(self):
         result = run_settings_probe(
@@ -209,6 +288,38 @@ assert settings.ALLOWED_HOSTS == ["api.smartdex.ma", "smartdex-backend.example.a
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("DJANGO_DEBUG must be false", result.stderr)
+
+    def test_production_cannot_load_dotenv(self):
+        result = run_settings_probe(
+            {**self.production_env, "DJANGO_LOAD_DOTENV": "true"},
+            "import config.settings",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_LOAD_DOTENV must be false", result.stderr)
+
+    def test_trusted_proxy_header_marks_request_secure(self):
+        self.probe(
+            """
+from django.test import RequestFactory
+request = RequestFactory().get("/api/health/", HTTP_X_FORWARDED_PROTO="https")
+assert request.is_secure() is True
+""",
+        )
+
+    def test_forwarded_header_is_ignored_when_proxy_trust_is_disabled(self):
+        self.probe(
+            """
+from django.test import RequestFactory
+from django.conf import settings
+assert settings.SECURE_PROXY_SSL_HEADER is None
+request = RequestFactory().get("/api/health/", HTTP_X_FORWARDED_PROTO="https")
+assert request.is_secure() is False
+""",
+            {
+                "USE_X_FORWARDED_PROTO": "false",
+                "SECURE_SSL_REDIRECT": "false",
+            },
+        )
 
 
 class LocalDevelopmentSettingsTests(SimpleTestCase):
@@ -243,6 +354,91 @@ class RuntimeSecurityPostureTests(SimpleTestCase):
             settings.MIDDLEWARE.index("django.middleware.security.SecurityMiddleware"),
             settings.MIDDLEWARE.index("whitenoise.middleware.WhiteNoiseMiddleware"),
         )
+
+    @override_settings(ALLOWED_HOSTS=["api.smartdex.ma"])
+    def test_unexpected_host_header_is_rejected(self):
+        response = Client().get("/api/health/", HTTP_HOST="attacker.example")
+        self.assertEqual(response.status_code, 400)
+
+    @override_settings(
+        ALLOWED_HOSTS=["testserver"],
+        CORS_ALLOWED_ORIGINS=["https://www.smartdex.ma"],
+    )
+    def test_authorized_cors_preflight_receives_cors_headers(self):
+        response = Client().options(
+            "/api/health/",
+            HTTP_ORIGIN="https://www.smartdex.ma",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response["Access-Control-Allow-Origin"],
+            "https://www.smartdex.ma",
+        )
+
+    @override_settings(
+        ALLOWED_HOSTS=["testserver"],
+        CORS_ALLOWED_ORIGINS=["https://www.smartdex.ma"],
+    )
+    def test_unauthorized_cors_origin_receives_no_cors_headers(self):
+        response = Client().get(
+            "/api/health/",
+            HTTP_ORIGIN="https://attacker.example",
+        )
+        self.assertNotIn("Access-Control-Allow-Origin", response)
+
+    def test_sensitive_routes_are_not_cacheable(self):
+        response = Client().get("/api/health/")
+        self.assertEqual(response["Cache-Control"], "no-store")
+
+    def test_static_admin_asset_is_discoverable_with_debug_false(self):
+        with override_settings(DEBUG=False):
+            self.assertIsNotNone(finders.find("admin/css/base.css"))
+
+    @override_settings(DEBUG=False)
+    def test_unhandled_api_error_response_is_sanitized(self):
+        secret = "sensitive-client-description"
+        response = public_exception_handler(RuntimeError(secret), {})
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn(secret, str(response.data))
+
+    @patch("apps.health.views.connection")
+    def test_readiness_uses_only_a_lightweight_database_query(self, connection):
+        cursor = connection.cursor
+        cursor.return_value.__enter__.return_value.fetchone.return_value = (1,)
+        response = readiness_check(APIRequestFactory().get("/api/health/ready/"))
+        cursor.return_value.__enter__.return_value.execute.assert_called_once_with("SELECT 1")
+        self.assertEqual(response.status_code, 200)
+
+
+class AdminCsrfTests(TestCase):
+    def test_admin_login_rejects_post_without_csrf_token(self):
+        response = Client(enforce_csrf_checks=True).post(
+            "/admin/login/",
+            {"username": "admin", "password": "invalid"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+class StartupAndGunicornTests(SimpleTestCase):
+    def test_startup_does_not_run_migrations_ingestion_or_openai(self):
+        entrypoint = (BASE_DIR / "scripts" / "docker-entrypoint.sh").read_text(encoding="utf-8")
+        initializer = (BASE_DIR / "scripts" / "init_chroma.py").read_text(encoding="utf-8")
+        startup = f"{entrypoint}\n{initializer}".lower()
+        self.assertNotIn("migrate", startup)
+        self.assertNotIn("ingest_docs", startup)
+        self.assertNotIn("openai", startup)
+
+    def test_docker_build_validates_chroma_seed(self):
+        dockerfile = (BASE_DIR / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("validate_seed", dockerfile)
+
+    def test_gunicorn_timeout_exceeds_ai_request_budget(self):
+        namespace = {}
+        exec((BASE_DIR / "gunicorn.conf.py").read_text(encoding="utf-8"), namespace)
+        self.assertEqual(namespace["timeout"], 120)
+        self.assertGreater(namespace["timeout"], 4 * settings.OPENAI_OPERATION_DEADLINE_SECONDS)
+        self.assertEqual(namespace["access_log_format"].count("%(q)s"), 0)
 
 
 class LogSanitizerTests(SimpleTestCase):

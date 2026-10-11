@@ -34,3 +34,8 @@ errorlog = "-"
 access_log_format = '%(h)s "%(m)s %(U)s %(H)s" %(s)s %(b)s %(L)s'
 capture_output = True
 loglevel = os.getenv("GUNICORN_LOG_LEVEL", "info")
+
+# Keep proxy trust explicit. For Azure Container Apps, use "*" only after verifying
+# that the container is reachable exclusively through ingress and ingress replaces
+# client-supplied forwarding headers.
+forwarded_allow_ips = os.getenv("GUNICORN_FORWARDED_ALLOW_IPS", "127.0.0.1")

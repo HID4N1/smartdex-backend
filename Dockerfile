@@ -4,6 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DJANGO_ENV=production \
     DJANGO_LOAD_DOTENV=false \
     DJANGO_DEBUG=false \
     HOME=/tmp \
@@ -22,9 +23,10 @@ RUN pip install --no-cache-dir --requirement requirements.txt
 
 COPY . .
 
-RUN DJANGO_DEBUG=true python manage.py collectstatic --noinput \
+RUN DJANGO_ENV=local DJANGO_DEBUG=true python manage.py collectstatic --noinput \
     && mv /app/chroma_db /app/chroma_seed \
     && mv /app/chroma_index_manifest.json /app/chroma_seed/manifest.json \
+    && python -c "from pathlib import Path; from core.ai.rag.index_runtime import validate_seed; validate_seed(Path('/app/chroma_seed'), Path('/app/chroma_seed/manifest.json'))" \
     && chown -R root:root /app/chroma_seed \
     && find /app/chroma_seed -type d -exec chmod 0555 {} + \
     && find /app/chroma_seed -type f -exec chmod 0444 {} + \

@@ -10,24 +10,33 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
-from pathlib import Path
-from dotenv import dotenv_values, load_dotenv
 import os
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
+
 from core.utils.public_input_validation import PUBLIC_JSON_BODY_LIMIT_BYTES
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 ENV_FILE = BASE_DIR / ".env"
-LOAD_DOTENV = os.getenv("DJANGO_LOAD_DOTENV", "true").strip().lower() in {
+_environment_before_dotenv = os.getenv("DJANGO_ENV", "local").strip().lower()
+_load_dotenv_default = _environment_before_dotenv not in {"production", "prod"}
+LOAD_DOTENV = os.getenv(
+    "DJANGO_LOAD_DOTENV",
+    "true" if _load_dotenv_default else "false",
+).strip().lower() in {
     "1",
     "true",
     "yes",
     "on",
 }
-LOCAL_ENV = dotenv_values(ENV_FILE) if LOAD_DOTENV else {}
+if _environment_before_dotenv in {"production", "prod"} and LOAD_DOTENV:
+    raise ImproperlyConfigured("DJANGO_LOAD_DOTENV must be false in production.")
 if LOAD_DOTENV:
     load_dotenv(ENV_FILE)
 
@@ -73,20 +82,48 @@ def env_str(name, default=""):
     return value.strip()
 
 
-def origins_from_hosts(hosts):
-    origins = []
-    for host in hosts:
-        if host in {"*", "localhost", "127.0.0.1", "[::1]"}:
-            continue
-        if host.startswith("."):
-            continue
-        origins.append(f"https://{host}")
-    return origins
-
-
 def require_production_setting(condition, message):
     if not condition:
         raise ImproperlyConfigured(message)
+
+
+def validate_origins(name, origins, *, require_https=False):
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (
+            parsed.scheme not in ({"https"} if require_https else {"http", "https"})
+            or not parsed.netloc
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+            or "*" in origin
+        ):
+            scheme_requirement = "HTTPS " if require_https else "HTTP(S) "
+            raise ImproperlyConfigured(
+                f"{name} must contain exact {scheme_requirement}origins without paths or wildcards."
+            )
+
+
+def validate_production_hosts(hosts):
+    require_production_setting(
+        bool(hosts),
+        "ALLOWED_HOSTS must not be empty in production.",
+    )
+    for host in hosts:
+        if (
+            host == "*"
+            or host.startswith(".")
+            or "://" in host
+            or "/" in host
+            or any(character.isspace() for character in host)
+        ):
+            raise ImproperlyConfigured(
+                "ALLOWED_HOSTS must list explicit production hostnames without wildcards, schemes, or paths."
+            )
+    require_production_setting(
+        "api.smartdex.ma" in hosts,
+        "ALLOWED_HOSTS must include api.smartdex.ma in production.",
+    )
 
 
 DEFAULT_SECRET_KEY = "l;skndflknsdFO;SDFLSKFNBSLAKFSL,DJF"
@@ -104,10 +141,7 @@ DEFAULT_CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
-DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS = [
-    "https://smartdex.ma",
-    "https://www.smartdex.ma",
-]
+PRODUCTION_FRONTEND_ORIGIN = "https://www.smartdex.ma"
 CHROMA_SEED_DIR = os.getenv("CHROMA_SEED_DIR", str(BASE_DIR / "chroma_db"))
 CHROMA_DIR = os.getenv("CHROMA_DIR", str(BASE_DIR / "chroma_db"))
 CHROMA_MANIFEST_PATH = os.getenv(
@@ -276,46 +310,69 @@ SMARTDEX_TEMP_PDF_RETENTION_HOURS = env_int(
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env_bool("DJANGO_DEBUG", default=env_bool("DEBUG", default=True))
-IS_PRODUCTION = not DEBUG
-DEPLOYMENT_ENVIRONMENT = env_str("DJANGO_ENV")
-if DEBUG and DEPLOYMENT_ENVIRONMENT.lower() in {"production", "prod"}:
+DEPLOYMENT_ENVIRONMENT = env_str("DJANGO_ENV", default="local").lower()
+if DEPLOYMENT_ENVIRONMENT == "prod":
+    DEPLOYMENT_ENVIRONMENT = "production"
+if DEPLOYMENT_ENVIRONMENT not in {"local", "development", "test", "production"}:
+    raise ImproperlyConfigured(
+        "DJANGO_ENV must be one of: local, development, test, production."
+    )
+IS_PRODUCTION = DEPLOYMENT_ENVIRONMENT == "production"
+if IS_PRODUCTION and LOAD_DOTENV:
+    raise ImproperlyConfigured("DJANGO_LOAD_DOTENV must be false in production.")
+
+DEBUG = env_bool(
+    "DJANGO_DEBUG",
+    default=env_bool("DEBUG", default=not IS_PRODUCTION),
+)
+if DEBUG and IS_PRODUCTION:
     raise ImproperlyConfigured(
         "DJANGO_DEBUG must be false for production deployments."
     )
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env_str("DJANGO_SECRET_KEY") or env_str("SECRET_KEY")
-if not SECRET_KEY and DEBUG:
+if not SECRET_KEY and not IS_PRODUCTION:
     SECRET_KEY = DEFAULT_SECRET_KEY
 
 if IS_PRODUCTION:
     require_production_setting(
         SECRET_KEY and SECRET_KEY not in PLACEHOLDER_SECRET_KEYS,
-        "DJANGO_SECRET_KEY or SECRET_KEY must be set to a non-placeholder value when DEBUG is false.",
+        "DJANGO_SECRET_KEY or SECRET_KEY must be set to a non-placeholder value in production.",
     )
     require_production_setting(
         OPENAI_API_KEY and OPENAI_API_KEY not in PLACEHOLDER_VALUES,
-        "OPENAI_API_KEY must be set to a non-placeholder value when DEBUG is false.",
+        "OPENAI_API_KEY must be set to a non-placeholder value in production.",
     )
 
-ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", default=DEFAULT_ALLOWED_HOSTS)
+ALLOWED_HOSTS = env_list(
+    "ALLOWED_HOSTS",
+    default=[] if IS_PRODUCTION else DEFAULT_ALLOWED_HOSTS,
+)
 if IS_PRODUCTION:
-    require_production_setting(
-        ALLOWED_HOSTS and "*" not in ALLOWED_HOSTS,
-        "ALLOWED_HOSTS must list explicit production hostnames when DEBUG is false.",
-    )
+    validate_production_hosts(ALLOWED_HOSTS)
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS",
-    default=(
-        DEFAULT_PRODUCTION_CORS_ALLOWED_ORIGINS
-        if IS_PRODUCTION
-        else DEFAULT_CORS_ALLOWED_ORIGINS
-    ),
+    default=[] if IS_PRODUCTION else DEFAULT_CORS_ALLOWED_ORIGINS,
 )
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = env_bool("CORS_ALLOW_CREDENTIALS", default=False)
+CORS_ALLOWED_ORIGIN_REGEXES = []
+validate_origins(
+    "CORS_ALLOWED_ORIGINS",
+    CORS_ALLOWED_ORIGINS,
+    require_https=IS_PRODUCTION,
+)
+if IS_PRODUCTION:
+    require_production_setting(
+        PRODUCTION_FRONTEND_ORIGIN in CORS_ALLOWED_ORIGINS,
+        f"CORS_ALLOWED_ORIGINS must include {PRODUCTION_FRONTEND_ORIGIN} in production.",
+    )
+    require_production_setting(
+        not CORS_ALLOW_CREDENTIALS,
+        "CORS_ALLOW_CREDENTIALS must remain false for the production API.",
+    )
 
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -341,7 +398,12 @@ CORS_ALLOW_METHODS = [
 
 CSRF_TRUSTED_ORIGINS = env_list(
     "CSRF_TRUSTED_ORIGINS",
-    default=origins_from_hosts(ALLOWED_HOSTS) if IS_PRODUCTION else [],
+    default=[],
+)
+validate_origins(
+    "CSRF_TRUSTED_ORIGINS",
+    CSRF_TRUSTED_ORIGINS,
+    require_https=IS_PRODUCTION,
 )
 
 DATA_UPLOAD_MAX_MEMORY_SIZE = PUBLIC_JSON_BODY_LIMIT_BYTES
@@ -372,6 +434,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
     ],
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
     "DEFAULT_THROTTLE_RATES": {
         "contact": os.getenv("THROTTLE_RATE_CONTACT", "5/hour"),
         "devis_create": os.getenv("THROTTLE_RATE_DEVIS_CREATE", "10/hour"),
@@ -385,14 +450,17 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
     ],
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
     "EXCEPTION_HANDLER": "core.utils.exception_handlers.public_exception_handler",
 }
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "core.middleware.RequestBodySizeLimitMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
+    "core.middleware.SensitiveResponseCacheMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -425,25 +493,67 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASE_URL = (
-    LOCAL_ENV.get("DATABASE_URL")
-    if "DATABASE_URL" in LOCAL_ENV
-    else os.getenv("DATABASE_URL")
-)
+DATABASE_URL = env_str("DATABASE_URL")
 if IS_PRODUCTION:
     require_production_setting(
         bool(DATABASE_URL),
-        "DATABASE_URL must be set when DEBUG is false.",
+        "DATABASE_URL must be set in production.",
     )
 
+DB_CONN_MAX_AGE = env_int("DB_CONN_MAX_AGE", default=60 if IS_PRODUCTION else 0)
+DB_CONN_HEALTH_CHECKS = env_bool("DB_CONN_HEALTH_CHECKS", default=IS_PRODUCTION)
+DB_CONNECT_TIMEOUT_SECONDS = env_int("DB_CONNECT_TIMEOUT_SECONDS", default=10)
+DB_STATEMENT_TIMEOUT_MS = env_int("DB_STATEMENT_TIMEOUT_MS", default=30000)
+DB_POOL_MODE = env_str("DB_POOL_MODE", default="transaction").lower()
+
+if DB_CONN_MAX_AGE < 0:
+    raise ImproperlyConfigured("DB_CONN_MAX_AGE cannot be negative.")
+if DB_CONNECT_TIMEOUT_SECONDS <= 0 or DB_STATEMENT_TIMEOUT_MS <= 0:
+    raise ImproperlyConfigured("Database timeouts must be greater than zero.")
+if DB_POOL_MODE not in {"transaction", "session", "direct"}:
+    raise ImproperlyConfigured("DB_POOL_MODE must be transaction, session, or direct.")
+
 if DATABASE_URL:
+    parsed_database_url = urlsplit(DATABASE_URL)
+    database_scheme = parsed_database_url.scheme.lower()
+    if IS_PRODUCTION and database_scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured(
+            "Production DATABASE_URL must use PostgreSQL; SQLite and other engines are not allowed."
+        )
+    requested_ssl_modes = parse_qs(parsed_database_url.query).get("sslmode", [])
+    if IS_PRODUCTION and requested_ssl_modes and requested_ssl_modes[-1].lower() not in {
+        "require",
+        "verify-ca",
+        "verify-full",
+    }:
+        raise ImproperlyConfigured(
+            "Production PostgreSQL must use sslmode=require, verify-ca, or verify-full."
+        )
     DATABASES = {
         "default": dj_database_url.parse(
             DATABASE_URL,
-            conn_max_age=600,
-            ssl_require=DATABASE_URL.startswith(("postgres://", "postgresql://")),
+            conn_max_age=DB_CONN_MAX_AGE,
+            conn_health_checks=DB_CONN_HEALTH_CHECKS,
+            ssl_require=IS_PRODUCTION and database_scheme in {"postgres", "postgresql"},
         )
     }
+    if database_scheme in {"postgres", "postgresql"}:
+        database_options = DATABASES["default"].setdefault("OPTIONS", {})
+        ssl_mode = str(database_options.get("sslmode", "require" if IS_PRODUCTION else "")).lower()
+        if IS_PRODUCTION and ssl_mode not in {"require", "verify-ca", "verify-full"}:
+            raise ImproperlyConfigured(
+                "Production PostgreSQL must use sslmode=require, verify-ca, or verify-full."
+            )
+        if IS_PRODUCTION:
+            database_options.setdefault("sslmode", "require")
+        database_options.setdefault("connect_timeout", DB_CONNECT_TIMEOUT_SECONDS)
+        database_options.setdefault(
+            "options",
+            f"-c statement_timeout={DB_STATEMENT_TIMEOUT_MS}",
+        )
+        DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = (
+            DB_POOL_MODE == "transaction"
+        )
 else:
     DATABASES = {
         "default": {
@@ -494,7 +604,18 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+WHITENOISE_MAX_AGE = env_int(
+    "WHITENOISE_MAX_AGE",
+    default=31536000 if IS_PRODUCTION else 0,
+)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
@@ -505,11 +626,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-USE_X_FORWARDED_PROTO = env_bool("USE_X_FORWARDED_PROTO", default=IS_PRODUCTION)
+USE_X_FORWARDED_PROTO = env_bool("USE_X_FORWARDED_PROTO", default=False)
 if USE_X_FORWARDED_PROTO:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", default=IS_PRODUCTION)
+if IS_PRODUCTION and SECURE_SSL_REDIRECT and not USE_X_FORWARDED_PROTO:
+    raise ImproperlyConfigured(
+        "USE_X_FORWARDED_PROTO must be explicitly enabled when production HTTPS redirection is enabled behind Azure ingress."
+    )
 SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", default=3600 if IS_PRODUCTION else 0)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool(
     "SECURE_HSTS_INCLUDE_SUBDOMAINS",
@@ -526,3 +651,32 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = env_str("SESSION_COOKIE_SAMESITE", default="Lax")
 CSRF_COOKIE_SAMESITE = env_str("CSRF_COOKIE_SAMESITE", default="Lax")
 X_FRAME_OPTIONS = "DENY"
+
+LOG_LEVEL = env_str("DJANGO_LOG_LEVEL", default="INFO")
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "{levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": LOG_LEVEL,
+    },
+    "loggers": {
+        "django.server": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+    },
+}
